@@ -46,7 +46,7 @@ USERS = {
     "auditor_01":        {"role": "auditor",            "name": "Quinn Auditor"},
 }
 
-WORKSPACE_ID = "ws-default-001"
+WORKSPACE_ID = "default"
 PROVIDERS = ["openai", "runway", "fal", "replicate", "unknown_provider"]
 MODELS = {
     "openai":           "gpt-4o-video",
@@ -242,7 +242,7 @@ def seed(db):
         db.add(pol)
         policy_records.append(pol)
     db.flush()
-    print(f"  ✓ {len(policy_records)} policies seeded")
+    print(f"  OK: {len(policy_records)} policies seeded")
 
     # ── Requests ───────────────────────────────────────────────────────────────
     scenarios = _request_scenarios()
@@ -288,7 +288,7 @@ def seed(db):
         ))
 
     db.flush()
-    print(f"  ✓ {len(request_ids)} governance requests seeded")
+    print(f"  OK: {len(request_ids)} governance requests seeded")
 
     # ── Assets ─────────────────────────────────────────────────────────────────
     asset_ids = []
@@ -374,7 +374,7 @@ def seed(db):
         ))
 
     db.flush()
-    print(f"  ✓ {len(asset_ids)} governance assets seeded")
+    print(f"  OK: {len(asset_ids)} governance assets seeded")
 
     # ── Exceptions ─────────────────────────────────────────────────────────────
     exception_configs = [
@@ -439,7 +439,7 @@ def seed(db):
             ))
 
     db.flush()
-    print(f"  ✓ {len(exception_configs)} exceptions seeded")
+    print(f"  OK: {len(exception_configs)} exceptions seeded")
 
     # ── Extra Governance Events (to reach 100+) ────────────────────────────────
     actions = [
@@ -473,8 +473,8 @@ def seed(db):
 
     db.flush()
     db.commit()
-    print(f"  ✓ {event_count} extra audit events seeded")
-    print("✅ Seed complete.")
+    print(f"  OK: {event_count} extra audit events seeded")
+    print("OK: Seed complete.")
 
 
 if __name__ == "__main__":

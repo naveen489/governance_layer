@@ -132,4 +132,10 @@ def submit_decision(
     record.updated_at = datetime.now(timezone.utc)
     db.commit()
 
-    return ReviewDecisionOut(status=body.decision, updated_state=new_state)
+    status_map = {
+        "approve": "approved",
+        "reject": "rejected",
+        "escalate": "escalated",
+        "request_changes": "changes_requested"
+    }
+    return ReviewDecisionOut(status=status_map.get(body.decision, body.decision), updated_state=new_state)
