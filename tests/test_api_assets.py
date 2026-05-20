@@ -6,11 +6,11 @@ REQUEST_ID = "shared-request-id-for-assets"
 
 def _ensure_parent_request(client):
     """Create a parent request if needed."""
-    from tests.conftest import TestSessionLocal
+    from governance.database import SessionLocal
     from governance.models.request import GovernanceRequest
     from datetime import datetime, timezone
 
-    db = TestSessionLocal()
+    db = SessionLocal()
     if not db.query(GovernanceRequest).filter(GovernanceRequest.id == REQUEST_ID).first():
         req = GovernanceRequest(
             id=REQUEST_ID,

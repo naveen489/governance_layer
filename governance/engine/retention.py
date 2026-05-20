@@ -13,6 +13,7 @@ evaluate_retention():
 """
 from __future__ import annotations
 from datetime import datetime, timezone
+import uuid
 from sqlalchemy.orm import Session
 
 from governance.models.asset import GovernanceAsset
@@ -103,6 +104,46 @@ def evaluate_retention(db: Session) -> dict[str, int]:
 
     db.commit()
     return {"expired": expired_count, "skipped_due_to_hold": skipped_count}
+
+def delete_expired_assets(db: Session) -> int:
+    """
+    Find assets in the 'expired' state and move them to 'deleted' state
+    if no legal holds or incident holds apply.
+    """
+    now = datetime.now(timezone.utc)
+    deleted_count = 0
+
+    expired_assets = (
+        db.query(GovernanceAsset)
+        .filter(GovernanceAsset.governance_state == "expired")
+        .all()
+    )
+
+    for asset in expired_assets:
+        # Final safety check before deletion
+        if asset.legal_hold or asset.incident_hold or _has_active_exception(db, asset.id):
+            continue
+        
+        # Soft delete the asset
+        asset.governance_state = "deleted"
+        asset.updated_at = now
+        
+        event = GovernanceEvent(
+            id=str(uuid.uuid4()),
+            workspace_id=asset.workspace_id,
+            target_type="asset",
+            target_id=asset.id,
+            actor_id="system:retention_scheduler",
+            action="delete",
+            reason="Asset expired and safely passed hold checks",
+            event_payload={"deleted_at": now.isoformat()},
+            occurred_at=now,
+        )
+        db.add(event)
+        deleted_count += 1
+        
+    db.commit()
+    return deleted_count
 
 
 def expire_exceptions(db: Session) -> int:

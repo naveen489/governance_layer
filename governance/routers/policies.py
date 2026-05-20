@@ -22,6 +22,8 @@ from governance.schemas.policy import (
 
 router = APIRouter(prefix="/api/governance/policies", tags=["Policies"])
 
+from governance.auth import get_current_user, CurrentUser
+
 
 @router.get("", response_model=GovernancePoliciesResponse)
 def list_policies(
@@ -30,11 +32,13 @@ def list_policies(
     is_active: Optional[bool] = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(GovernancePolicy)
-    if workspace_id:
-        q = q.filter(GovernancePolicy.workspace_id == workspace_id)
+    if workspace_id and workspace_id != current_user.workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot query another workspace")
+    
+    q = db.query(GovernancePolicy).filter(GovernancePolicy.workspace_id == current_user.workspace_id)
     if policy_scope:
         q = q.filter(GovernancePolicy.policy_scope == policy_scope)
     if is_active is not None:
@@ -45,11 +49,15 @@ def list_policies(
 
 
 @router.post("", response_model=GovernancePolicyDetail, status_code=201)
-def create_policy(body: CreatePolicyIn, db: Session = Depends(get_db)):
+def create_policy(body: CreatePolicyIn, current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    workspace_id = current_user.workspace_id
+    if body.workspace_id and body.workspace_id != workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot create policy in another workspace")
+
     now = datetime.now(timezone.utc)
     policy = GovernancePolicy(
         id=str(uuid.uuid4()),
-        workspace_id=body.workspace_id,
+        workspace_id=workspace_id,
         policy_scope=body.policy_scope,
         version=body.version,
         policy_json=body.policy_json,
@@ -65,10 +73,13 @@ def create_policy(body: CreatePolicyIn, db: Session = Depends(get_db)):
 
 
 @router.patch("/{policy_id}", response_model=GovernancePolicyDetail)
-def update_policy(policy_id: str, body: UpdatePolicyIn, db: Session = Depends(get_db)):
-    policy = db.query(GovernancePolicy).filter(GovernancePolicy.id == policy_id).first()
+def update_policy(policy_id: str, body: UpdatePolicyIn, current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    policy = db.query(GovernancePolicy).filter(
+        GovernancePolicy.id == policy_id,
+        GovernancePolicy.workspace_id == current_user.workspace_id
+    ).first()
     if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
+        raise HTTPException(status_code=404, detail="Policy not found in workspace")
     if body.is_active is not None:
         policy.is_active = body.is_active
     if body.policy_json is not None:

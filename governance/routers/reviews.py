@@ -6,7 +6,7 @@ POST /{id}/decision – approve | reject | escalate | request_changes
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,8 +20,7 @@ from governance.schemas.asset import GovernanceAssetDetail
 router = APIRouter(prefix="/api/governance/reviews", tags=["Reviews"])
 
 
-def _actor(x_user_id: Optional[str] = Header(default=None)) -> str:
-    return x_user_id or "anonymous"
+from governance.auth import get_current_user, CurrentUser
 
 
 class ReviewDecisionIn(BaseModel):
@@ -46,13 +45,16 @@ class ReviewItem(BaseModel):
 
 
 @router.get("", response_model=List[ReviewItem])
-def get_reviewer_queue(db: Session = Depends(get_db)):
-    """Return all requests and assets currently in review_required state."""
+def get_reviewer_queue(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return all requests and assets currently in review_required state for the current workspace."""
     items: List[ReviewItem] = []
 
     reqs = (
         db.query(GovernanceRequest)
-        .filter(GovernanceRequest.governance_state == "review_required")
+        .filter(
+            GovernanceRequest.governance_state == "review_required",
+            GovernanceRequest.workspace_id == current_user.workspace_id
+        )
         .order_by(GovernanceRequest.updated_at.asc())
         .all()
     )
@@ -71,7 +73,10 @@ def get_reviewer_queue(db: Session = Depends(get_db)):
 
     assets = (
         db.query(GovernanceAsset)
-        .filter(GovernanceAsset.governance_state == "review_required")
+        .filter(
+            GovernanceAsset.governance_state == "review_required",
+            GovernanceAsset.workspace_id == current_user.workspace_id
+        )
         .order_by(GovernanceAsset.updated_at.asc())
         .all()
     )
@@ -92,8 +97,7 @@ def get_reviewer_queue(db: Session = Depends(get_db)):
 def submit_decision(
     item_id: str,
     body: ReviewDecisionIn,
-    db: Session = Depends(get_db),
-    actor: str = Depends(_actor),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     decision_map = {
         "approve":          "reviewer_approve",
@@ -106,13 +110,19 @@ def submit_decision(
         raise HTTPException(status_code=400, detail=f"Unknown decision '{body.decision}'")
 
     # Try request first, then asset
-    record = db.query(GovernanceRequest).filter(GovernanceRequest.id == item_id).first()
+    record = db.query(GovernanceRequest).filter(
+        GovernanceRequest.id == item_id,
+        GovernanceRequest.workspace_id == current_user.workspace_id
+    ).first()
     record_type = "request"
     if record is None:
-        record = db.query(GovernanceAsset).filter(GovernanceAsset.id == item_id).first()
+        record = db.query(GovernanceAsset).filter(
+            GovernanceAsset.id == item_id,
+            GovernanceAsset.workspace_id == current_user.workspace_id
+        ).first()
         record_type = "asset"
     if record is None:
-        raise HTTPException(status_code=404, detail="Review item not found")
+        raise HTTPException(status_code=404, detail="Review item not found in workspace")
 
     try:
         new_state = transition(
@@ -122,7 +132,7 @@ def submit_decision(
             target_type=record_type,
             target_id=item_id,
             workspace_id=record.workspace_id,
-            actor_id=actor,
+            actor_id=current_user.id,
             reason=body.reason,
         )
     except InvalidTransitionError as e:

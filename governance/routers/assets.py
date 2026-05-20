@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -25,21 +25,26 @@ from governance.schemas.asset import EvaluateAssetIn, EvaluateAssetOut, Governan
 router = APIRouter(prefix="/api/governance/assets", tags=["Assets"])
 
 
-def _actor(x_user_id: Optional[str] = Header(default=None)) -> str:
-    return x_user_id or "anonymous"
+from governance.auth import get_current_user, CurrentUser
 
 
 @router.post("/evaluate", response_model=EvaluateAssetOut, status_code=201)
 def evaluate_asset(
     body: EvaluateAssetIn,
     db: Session = Depends(get_db),
-    actor: str = Depends(_actor),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    # Resolve workspace from parent request if not provided
-    workspace_id = body.workspace_id
-    if not workspace_id:
-        parent = db.query(GovernanceRequest).filter(GovernanceRequest.id == body.request_id).first()
-        workspace_id = parent.workspace_id if parent else "default"
+    workspace_id = current_user.workspace_id
+    if body.workspace_id and body.workspace_id != workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot create asset in another workspace")
+    
+    if body.request_id:
+        parent = db.query(GovernanceRequest).filter(
+            GovernanceRequest.id == body.request_id,
+            GovernanceRequest.workspace_id == workspace_id
+        ).first()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent request not found in workspace")
 
     # Evaluate asset policy
     eval_payload = {**body.asset_payload, "provider_key": body.provider_key, "model_key": body.model_key}
@@ -96,7 +101,7 @@ def evaluate_asset(
         target_type="asset",
         target_id=asset_id,
         workspace_id=workspace_id,
-        actor_id=actor,
+        actor_id=current_user.id,
         reason="; ".join(decision.reasons) if decision.reasons else None,
         event_payload={"decision": decision.action, "rule_ids": decision.rule_ids},
     )
@@ -115,11 +120,13 @@ def list_assets(
     request_id: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(GovernanceAsset)
-    if workspace_id:
-        q = q.filter(GovernanceAsset.workspace_id == workspace_id)
+    if workspace_id and workspace_id != current_user.workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot query another workspace")
+
+    q = db.query(GovernanceAsset).filter(GovernanceAsset.workspace_id == current_user.workspace_id)
     if governance_state:
         q = q.filter(GovernanceAsset.governance_state == governance_state)
     if request_id:
@@ -128,16 +135,22 @@ def list_assets(
 
 
 @router.get("/{asset_id}", response_model=GovernanceAssetDetail)
-def get_asset(asset_id: str, db: Session = Depends(get_db)):
-    asset = db.query(GovernanceAsset).filter(GovernanceAsset.id == asset_id).first()
+def get_asset(asset_id: str, current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     return asset
 
 
 @router.get("/{asset_id}/manifest")
-def download_manifest(asset_id: str, db: Session = Depends(get_db)):
-    asset = db.query(GovernanceAsset).filter(GovernanceAsset.id == asset_id).first()
+def download_manifest(asset_id: str, current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     return JSONResponse(

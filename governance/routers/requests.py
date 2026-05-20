@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from governance.database import get_db
@@ -24,18 +24,21 @@ from governance.schemas.request import (
 router = APIRouter(prefix="/api/governance/requests", tags=["Requests"])
 
 
-def _actor(x_user_id: Optional[str] = Header(default=None)) -> str:
-    return x_user_id or "anonymous"
+from governance.auth import get_current_user, CurrentUser
 
 
 @router.post("", response_model=GovernanceRequestOut, status_code=201)
 def create_governance_request(
     body: CreateGovernanceRequestIn,
     db: Session = Depends(get_db),
-    actor: str = Depends(_actor),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     req_id = str(uuid.uuid4())
-    workspace_id = body.workspace_id or "default"
+    
+    # Strictly enforce workspace isolation
+    workspace_id = current_user.workspace_id
+    if body.workspace_id and body.workspace_id != workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot create request in another workspace")
 
     # Evaluate policy
     decision = evaluate_policy(db, scope="request", payload=body.request_payload, workspace_id=workspace_id)
@@ -54,7 +57,7 @@ def create_governance_request(
             "reasons": decision.reasons,
             "rule_ids": decision.rule_ids,
         },
-        created_by=body.created_by or actor,
+        created_by=body.created_by or current_user.id,
         simulation_mode=body.simulation_mode,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -70,7 +73,7 @@ def create_governance_request(
         target_type="request",
         target_id=req_id,
         workspace_id=workspace_id,
-        actor_id=actor,
+        actor_id=current_user.id,
         reason="; ".join(decision.reasons) if decision.reasons else None,
         event_payload={"decision": decision.action, "rule_ids": decision.rule_ids},
     )
@@ -108,19 +111,29 @@ def list_requests(
     governance_state: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(GovernanceRequest)
-    if workspace_id:
-        q = q.filter(GovernanceRequest.workspace_id == workspace_id)
+    # Strict workspace isolation
+    if workspace_id and workspace_id != current_user.workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot query another workspace")
+    
+    q = db.query(GovernanceRequest).filter(GovernanceRequest.workspace_id == current_user.workspace_id)
     if governance_state:
         q = q.filter(GovernanceRequest.governance_state == governance_state)
     return q.order_by(GovernanceRequest.created_at.desc()).offset(offset).limit(limit).all()
 
 
 @router.get("/{request_id}", response_model=GovernanceRequestDetail)
-def get_request(request_id: str, db: Session = Depends(get_db)):
-    req = db.query(GovernanceRequest).filter(GovernanceRequest.id == request_id).first()
+def get_request(
+    request_id: str, 
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    req = db.query(GovernanceRequest).filter(
+        GovernanceRequest.id == request_id,
+        GovernanceRequest.workspace_id == current_user.workspace_id
+    ).first()
     if not req:
         raise HTTPException(status_code=404, detail="Governance request not found")
     return req

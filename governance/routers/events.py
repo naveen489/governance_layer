@@ -6,7 +6,7 @@ GET – audit log with filters: workspace_id, target_type, target_id, actor_id,
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from governance.database import get_db
@@ -14,6 +14,8 @@ from governance.models.event import GovernanceEvent
 from governance.schemas.event import GovernanceEventsResponse, GovernanceEventOut
 
 router = APIRouter(prefix="/api/governance/events", tags=["Audit Events"])
+
+from governance.auth import get_current_user, CurrentUser
 
 
 @router.get("", response_model=GovernanceEventsResponse)
@@ -27,11 +29,13 @@ def query_events(
     date_to: Optional[datetime] = Query(default=None),
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(GovernanceEvent)
-    if workspace_id:
-        q = q.filter(GovernanceEvent.workspace_id == workspace_id)
+    if workspace_id and workspace_id != current_user.workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot query another workspace")
+    
+    q = db.query(GovernanceEvent).filter(GovernanceEvent.workspace_id == current_user.workspace_id)
     if target_type:
         q = q.filter(GovernanceEvent.target_type == target_type)
     if target_id:

@@ -64,6 +64,8 @@ def _matches(when_clause: dict[str, Any], payload: dict[str, Any]) -> bool:
     return True
 
 
+from governance.engine.provider_registry import get_provider_traits
+
 def evaluate_policy(
     db: Session,
     scope: str,
@@ -98,12 +100,20 @@ def evaluate_policy(
     rules = policy_row.policy_json.get("rules", [])
     decision = PolicyDecision(action="pass", policy_version=policy_row.version)
 
+    # Inject provider traits into payload for evaluation if provider_key exists
+    eval_payload = payload.copy()
+    if "provider_key" in eval_payload:
+        traits = get_provider_traits(eval_payload["provider_key"])
+        # Prefix traits to avoid collisions
+        for k, v in traits.items():
+            eval_payload[f"provider_trait_{k}"] = v
+
     for rule in rules:
         when = rule.get("when", {})
         then = rule.get("then", {})
         rule_id = rule.get("rule_id", "unnamed_rule")
 
-        if _matches(when, payload):
+        if _matches(when, eval_payload):
             triggered_action = then.get("action", "pass")
             triggered_reason = then.get("reason", "")
 

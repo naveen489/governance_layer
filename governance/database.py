@@ -5,6 +5,7 @@ Uses SQLite for MVP; swap DATABASE_URL env-var to use PostgreSQL.
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -14,7 +15,15 @@ DATABASE_URL = os.environ.get(
 # connect_args only needed for SQLite
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args, echo=False)
+if DATABASE_URL == "sqlite:///:memory:":
+    engine = create_engine(
+        DATABASE_URL, 
+        connect_args=connect_args, 
+        poolclass=StaticPool
+    )
+else:
+    engine = create_engine(DATABASE_URL, connect_args=connect_args, echo=False)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

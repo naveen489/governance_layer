@@ -1,48 +1,48 @@
 """
-Pytest configuration – shared test database, TestClient, and scheduler mock.
-Everything is session-scoped so fixtures are set up exactly once.
+Pytest configuration.
+Uses sqlite:///:memory: which is now pooled with StaticPool in database.py.
 """
 import os
 import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
+# Must set before importing anything from governance
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-TEST_ENGINE = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=TEST_ENGINE)
+from governance.database import Base, engine, get_db
+from governance.main import app
+from governance.models.request import GovernanceRequest
+from governance.models.asset import GovernanceAsset
+from governance.models.event import GovernanceEvent
+from governance.models.exception import GovernanceException
+from governance.models.policy import GovernancePolicy
 
+from governance.auth import get_current_user, CurrentUser
+from fastapi import Request
 
-def get_test_db():
-    db = TestSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def override_get_current_user(request: Request):
+    user_id = request.headers.get("X-User-Id", "test-user")
+    role = request.headers.get("X-User-Role", "admin")
+    workspace_id = request.headers.get("X-Workspace-Id", "default")
+    return CurrentUser(user_id=user_id, role=role, workspace_id=workspace_id)
 
+app.dependency_overrides[get_current_user] = override_get_current_user
+
+# We don't override get_db because the normal get_db uses SessionLocal, 
+# which is bound to the StaticPool engine!
 
 @pytest.fixture(scope="session")
 def client():
     """
-    Session-scoped TestClient that:
-    1. Creates all ORM tables in the test engine.
-    2. Overrides the get_db dependency.
-    3. Mocks the scheduler.
-    4. Seeds a basic policy so API evaluation works.
+    Session-scoped TestClient that initializes the db.
     """
-    from governance.models import request, asset, event, exception, policy  # noqa
-    from governance.database import Base, get_db
-    from governance.main import app
+    Base.metadata.create_all(bind=engine)
 
-    Base.metadata.create_all(bind=TEST_ENGINE)
-    app.dependency_overrides[get_db] = get_test_db
-
-    # Seed a request-scope policy
-    from governance.models.policy import GovernancePolicy
+    from governance.database import SessionLocal
     from datetime import datetime, timezone
-    db = TestSessionLocal()
+    db = SessionLocal()
+    
     if not db.query(GovernancePolicy).filter(GovernancePolicy.id == "shared-req-pol").first():
         pol = GovernancePolicy(
             id="shared-req-pol",
@@ -80,5 +80,4 @@ def client():
         with TestClient(app) as c:
             yield c
 
-    app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=TEST_ENGINE)
+    Base.metadata.drop_all(bind=engine)

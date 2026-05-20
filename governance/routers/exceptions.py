@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from governance.database import get_db
@@ -25,25 +25,28 @@ from governance.schemas.exception import (
 router = APIRouter(prefix="/api/governance/exceptions", tags=["Exceptions"])
 
 
-def _actor(x_user_id: Optional[str] = Header(default=None)) -> str:
-    return x_user_id or "anonymous"
+from governance.auth import get_current_user, CurrentUser
 
 
 @router.post("", response_model=SubmitExceptionOut, status_code=201)
 def submit_exception(
     body: SubmitExceptionIn,
     db: Session = Depends(get_db),
-    actor: str = Depends(_actor),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     exc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+    
+    workspace_id = current_user.workspace_id
+    if body.workspace_id and body.workspace_id != workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot create exception in another workspace")
 
     exc = GovernanceException(
         id=exc_id,
-        workspace_id=body.workspace_id or "default",
+        workspace_id=workspace_id,
         target_type=body.target_type,
         target_id=body.target_id,
-        requested_by=actor,
+        requested_by=current_user.id,
         status="pending",
         scope_json=body.scope_json,
         expiry_at=body.expiry_at,
@@ -55,10 +58,10 @@ def submit_exception(
 
     # Audit event
     event = GovernanceEvent(
-        workspace_id=body.workspace_id or "default",
+        workspace_id=workspace_id,
         target_type="exception",
         target_id=exc_id,
-        actor_id=actor,
+        actor_id=current_user.id,
         action="exception_submitted",
         reason=body.business_reason,
         event_payload={"target_type": body.target_type, "target_id": body.target_id},
@@ -77,11 +80,13 @@ def list_exceptions(
     target_type: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(GovernanceException)
-    if workspace_id:
-        q = q.filter(GovernanceException.workspace_id == workspace_id)
+    if workspace_id and workspace_id != current_user.workspace_id:
+        raise HTTPException(status_code=403, detail="Cannot query another workspace")
+    
+    q = db.query(GovernanceException).filter(GovernanceException.workspace_id == current_user.workspace_id)
     if status:
         q = q.filter(GovernanceException.status == status)
     if target_type:
@@ -97,11 +102,14 @@ def decide_exception(
     exception_id: str,
     body: ExceptionDecisionIn,
     db: Session = Depends(get_db),
-    actor: str = Depends(_actor),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    exc = db.query(GovernanceException).filter(GovernanceException.id == exception_id).first()
+    exc = db.query(GovernanceException).filter(
+        GovernanceException.id == exception_id,
+        GovernanceException.workspace_id == current_user.workspace_id
+    ).first()
     if not exc:
-        raise HTTPException(status_code=404, detail="Exception not found")
+        raise HTTPException(status_code=404, detail="Exception not found in workspace")
     if exc.status != "pending":
         raise HTTPException(status_code=422, detail=f"Exception is already '{exc.status}'")
 
@@ -110,7 +118,7 @@ def decide_exception(
 
     now = datetime.now(timezone.utc)
     exc.status = "approved" if body.decision == "approve" else "rejected"
-    exc.approved_by = actor
+    exc.approved_by = current_user.id
     exc.updated_at = now
     if body.expiry_at and body.decision == "approve":
         exc.expiry_at = body.expiry_at
@@ -121,7 +129,7 @@ def decide_exception(
         workspace_id=exc.workspace_id,
         target_type="exception",
         target_id=exception_id,
-        actor_id=actor,
+        actor_id=current_user.id,
         action=f"exception_{exc.status}",
         reason=body.reason,
         event_payload={"decision": body.decision, "scope_json": body.scope_json},

@@ -10,12 +10,13 @@ _scheduler: BackgroundScheduler | None = None
 
 def _run_retention():
     from governance.database import SessionLocal
-    from governance.engine.retention import evaluate_retention, expire_exceptions
+    from governance.engine.retention import evaluate_retention, expire_exceptions, delete_expired_assets
     db = SessionLocal()
     try:
         result = evaluate_retention(db)
         expired_exc = expire_exceptions(db)
-        print(f"[retention] expired assets={result['expired']} skipped={result['skipped_due_to_hold']} expired_exceptions={expired_exc}")
+        deleted = delete_expired_assets(db)
+        print(f"[retention] expired assets={result['expired']} skipped={result['skipped_due_to_hold']} expired_exceptions={expired_exc} deleted={deleted}")
     finally:
         db.close()
 

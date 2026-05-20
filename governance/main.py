@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from governance.database import create_all_tables
 from governance.scheduler import start_scheduler, stop_scheduler
-from governance.routers import requests, assets, reviews, exceptions, events, policies
+from governance.routers import requests, assets, reviews, exceptions, events, policies, auth
 
 
 @asynccontextmanager
@@ -59,6 +59,7 @@ app.include_router(reviews.router)
 app.include_router(exceptions.router)
 app.include_router(events.router)
 app.include_router(policies.router)
+app.include_router(auth.router)
 
 
 @app.get("/health", tags=["Health"])
