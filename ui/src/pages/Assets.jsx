@@ -1,3 +1,4 @@
+import { fetchApi } from '../api.js'
 import { useState, useEffect } from 'react'
 
 function StateBadge({ state }) {
@@ -9,7 +10,9 @@ function StateBadge({ state }) {
   )
 }
 
-function AssetDetailModal({ asset, onClose }) {
+function AssetDetailModal({ asset, onClose, onRefresh }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const prov = asset.provenance_json || {}
   const manifest = asset.rights_manifest_json || {}
 
@@ -21,6 +24,22 @@ function AssetDetailModal({ asset, onClose }) {
     a.download = `manifest_${asset.id}.json`
     a.click()
     URL.revokeObjectURL(url)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleAction = async (endpoint) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetchApi(`/api/governance/assets/${asset.id}/${endpoint}`, { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+      onRefresh()
+      onClose()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -99,11 +118,24 @@ function AssetDetailModal({ asset, onClose }) {
           </div>
         </div>
 
-        <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <button id={`btn-download-manifest-${asset.id}`} className="btn btn-primary btn-sm" onClick={downloadManifest}>
+        {error && <div style={{ marginTop: '16px' }} className="alert alert-error">{error}</div>}
+        
+        <div className="modal-actions" style={{ marginTop: '20px' }}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={loading}>Close</button>
+          <button id={`btn-download-manifest-${asset.id}`} className="btn btn-ghost btn-sm" onClick={downloadManifest} disabled={loading}>
             ⬇ Download Manifest
           </button>
+          
+          {asset.governance_state === 'governance_passed' && (
+            <>
+              <button className="btn btn-secondary btn-sm" onClick={() => handleAction('retention')} disabled={loading}>
+                Update Retention
+              </button>
+              <button className="btn btn-success btn-sm" onClick={() => handleAction('publish')} disabled={loading}>
+                Publish Asset
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -116,19 +148,21 @@ export default function Assets() {
   const [stateFilter, setStateFilter] = useState('')
   const [selected, setSelected]     = useState(null)
 
-  useEffect(() => {
+  const load = () => {
     const url = stateFilter
       ? `/api/governance/assets?limit=100&governance_state=${stateFilter}`
       : '/api/governance/assets?limit=100'
     setLoading(true)
-    fetch(url)
+    fetchApi(url)
       .then(r => r.json())
       .then(d => setAssets(Array.isArray(d) ? d : []))
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [stateFilter])
+  }
 
-  const states = ['', 'governance_passed', 'review_required', 'blocked', 'asset_registered', 'expired', 'deleted']
+  useEffect(() => { load() }, [stateFilter])
+
+  const states = ['', 'governance_passed', 'review_required', 'blocked', 'asset_registered', 'expired', 'deleted', 'published']
 
   return (
     <div>
@@ -212,7 +246,7 @@ export default function Assets() {
         )}
       </div>
 
-      {selected && <AssetDetailModal asset={selected} onClose={() => setSelected(null)} />}
+      {selected && <AssetDetailModal asset={selected} onClose={() => setSelected(null)} onRefresh={load} />}
     </div>
   )
 }

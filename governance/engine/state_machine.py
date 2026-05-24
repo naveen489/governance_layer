@@ -25,30 +25,39 @@ class InvalidTransitionError(Exception):
 
 # Allowed (current_state, trigger) → new_state
 TRANSITIONS: dict[tuple[str, str], str] = {
-    # Request lifecycle
     ("draft", "policy_pass"):                   "policy_passed",
     ("draft", "policy_warn"):                   "policy_passed",
     ("draft", "policy_review_required"):        "review_required",
     ("draft", "policy_block"):                  "blocked",
     ("policy_passed", "auto_approve"):          "approved_for_execution",
     ("review_required", "reviewer_approve"):    "approved_for_execution",
+    ("review_required", "asset_reviewer_approve"): "governance_passed",
     ("review_required", "reviewer_reject"):     "rejected",
     ("review_required", "request_exception"):   "exception_pending",
+    ("review_required", "request_changes"):     "changes_requested",
+    ("review_required", "escalate"):            "escalated",
+    ("changes_requested", "resubmit"):          "review_required",
+    ("escalated", "reviewer_approve"):          "approved_for_execution",
+    ("escalated", "reviewer_reject"):           "rejected",
+    ("escalated", "request_changes"):           "changes_requested",
+    ("escalated", "asset_reviewer_approve"):    "governance_passed",
     ("blocked", "request_exception"):           "exception_pending",
     ("exception_pending", "exception_approve"): "exception_approved",
     ("exception_pending", "exception_reject"):  "rejected",
     ("exception_approved", "grant_execution"):  "approved_for_execution",
     ("approved_for_execution", "execute"):      "executed",
+    ("approved_for_execution", "exception_expired"): "blocked",
     # Asset lifecycle
     ("executed", "register_asset"):             "asset_registered",
     ("asset_registered", "asset_policy_pass"):  "governance_passed",
     ("asset_registered", "asset_policy_review"): "review_required",
     ("asset_registered", "asset_policy_block"): "blocked",
+    ("governance_passed", "publish_pass"):      "published",
+    ("governance_passed", "publish_block"):     "blocked",
     # Retention lifecycle
     ("governance_passed", "expire"):            "expired",
+    ("published", "expire"):                    "expired",
     ("expired", "delete"):                      "deleted",
-    # Re-review after changes
-    ("review_required", "escalate"):            "review_required",
 }
 
 

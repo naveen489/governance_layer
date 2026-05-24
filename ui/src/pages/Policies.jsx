@@ -1,3 +1,4 @@
+import { fetchApi } from '../api.js'
 import { useState, useEffect } from 'react'
 
 const DEFAULT_POLICY = JSON.stringify({
@@ -27,7 +28,7 @@ function PolicyModal({ onClose, onDone }) {
       return
     }
     try {
-      const res = await fetch('/api/governance/policies', {
+      const res = await fetchApi('/api/governance/policies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspace_id: 'default', policy_scope: scope, version, policy_json: parsed, is_active: isActive }),
@@ -103,7 +104,7 @@ export default function Policies() {
   const load = () => {
     setLoading(true)
     const url = scopeFilter ? `/api/governance/policies?policy_scope=${scopeFilter}` : '/api/governance/policies'
-    fetch(url)
+    fetchApi(url)
       .then(r => r.json())
       .then(d => setPolicies(d?.policies || []))
       .catch(console.error)
@@ -113,7 +114,7 @@ export default function Policies() {
   useEffect(() => { load() }, [scopeFilter])
 
   const toggleActive = async (policy) => {
-    await fetch(`/api/governance/policies/${policy.id}`, {
+    await fetchApi(`/api/governance/policies/${policy.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: !policy.is_active }),

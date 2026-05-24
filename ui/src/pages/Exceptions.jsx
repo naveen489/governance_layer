@@ -1,4 +1,15 @@
+import { fetchApi } from '../api.js'
 import { useState, useEffect } from 'react'
+
+function formatExpiry(dateStr) {
+  if (!dateStr) return '—'
+  const diff = new Date(dateStr).getTime() - Date.now()
+  if (diff < 0) return 'Expired'
+  const h = Math.floor(diff / 3600000)
+  if (h > 24) return `in ${Math.floor(h / 24)}d`
+  if (h > 0)  return `in ${h}h`
+  return `in ${Math.floor(diff / 60000)}m`
+}
 
 function StateBadge({ state }) {
   return (
@@ -24,7 +35,7 @@ function DecideModal({ exc, onClose, onDone }) {
     try {
       const body = { decision, reason }
       if (decision === 'approve' && expiry) body.expiry_at = new Date(expiry).toISOString()
-      const res = await fetch(`/api/governance/exceptions/${exc.id}`, {
+      const res = await fetchApi(`/api/governance/exceptions/${exc.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': 'exc_reviewer_01' },
         body: JSON.stringify(body),
@@ -101,7 +112,7 @@ export default function Exceptions() {
     setLoading(true)
     const statusMap = { Pending: 'pending', Approved: 'approved', Rejected: 'rejected', Expired: 'expired' }
     const statusParam = statusMap[tab] ? `&status=${statusMap[tab]}` : ''
-    fetch(`/api/governance/exceptions?limit=100${statusParam}`)
+    fetchApi(`/api/governance/exceptions?limit=100${statusParam}`)
       .then(r => r.json())
       .then(d => setExceptions(d?.exceptions || []))
       .catch(console.error)
@@ -177,7 +188,7 @@ export default function Exceptions() {
                     </td>
                     <td className="mono" style={{ fontSize: '11px' }}>{exc.requested_by}</td>
                     <td style={{ fontSize: '12px' }}>
-                      {exc.expiry_at ? new Date(exc.expiry_at).toLocaleDateString() : '—'}
+                      {formatExpiry(exc.expiry_at)}
                     </td>
                     <td>
                       {exc.status === 'pending' ? (

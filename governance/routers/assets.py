@@ -157,3 +157,95 @@ def download_manifest(asset_id: str, current_user: CurrentUser = Depends(get_cur
         content=asset.rights_manifest_json or {},
         headers={"Content-Disposition": f'attachment; filename="manifest_{asset_id}.json"'},
     )
+
+
+@router.post("/{asset_id}/publish")
+def check_publish_policy(
+    asset_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+        
+    if asset.governance_state != "governance_passed":
+        raise HTTPException(status_code=400, detail="Asset must be in governance_passed state to evaluate publish policy")
+
+    decision = evaluate_policy(db, scope="publish", payload=asset.asset_payload, workspace_id=asset.workspace_id)
+    
+    if decision.action == "pass":
+        trigger = "publish_pass"
+    else:
+        trigger = "publish_block"
+        
+    new_state = transition(
+        db,
+        current_state=asset.governance_state,
+        trigger=trigger,
+        target_type="asset",
+        target_id=asset.id,
+        workspace_id=asset.workspace_id,
+        actor_id=current_user.id,
+        reason="; ".join(decision.reasons) if decision.reasons else "Evaluated publish policy",
+        event_payload={"decision": decision.action, "rule_ids": decision.rule_ids},
+    )
+
+    asset.governance_state = new_state
+    asset.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"asset_id": asset_id, "state": new_state, "reasons": decision.reasons}
+
+
+@router.post("/{asset_id}/retention")
+def check_retention_policy(
+    asset_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    decision = evaluate_policy(db, scope="retention", payload=asset.asset_payload, workspace_id=asset.workspace_id)
+    
+    new_class = asset.retention_class
+    if decision.action in ["block", "review_required"]:
+        new_class = "extended"
+    elif decision.action == "warn":
+        new_class = "standard"
+        
+    if new_class != asset.retention_class:
+        asset.retention_class = new_class
+        days = RETENTION_CLASSES.get(new_class, 30)
+        # Recompute from created_at
+        if asset.created_at.tzinfo is None:
+            created_at = asset.created_at.replace(tzinfo=timezone.utc)
+        else:
+            created_at = asset.created_at
+        asset.retention_expires_at = created_at + timedelta(days=days)
+        
+        from governance.models.event import GovernanceEvent
+        event = GovernanceEvent(
+            workspace_id=asset.workspace_id,
+            target_type="asset",
+            target_id=asset.id,
+            actor_id=current_user.id,
+            action="update_retention",
+            reason=f"Retention policy evaluated to {decision.action}, updated class to {new_class}",
+            event_payload={"new_class": new_class, "rule_ids": decision.rule_ids},
+            occurred_at=datetime.now(timezone.utc),
+        )
+        db.add(event)
+        
+    asset.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"asset_id": asset_id, "retention_class": asset.retention_class, "reasons": decision.reasons}

@@ -52,7 +52,7 @@ def get_reviewer_queue(current_user: CurrentUser = Depends(get_current_user), db
     reqs = (
         db.query(GovernanceRequest)
         .filter(
-            GovernanceRequest.governance_state == "review_required",
+            GovernanceRequest.governance_state.in_(["review_required", "escalated"]),
             GovernanceRequest.workspace_id == current_user.workspace_id
         )
         .order_by(GovernanceRequest.updated_at.asc())
@@ -74,7 +74,7 @@ def get_reviewer_queue(current_user: CurrentUser = Depends(get_current_user), db
     assets = (
         db.query(GovernanceAsset)
         .filter(
-            GovernanceAsset.governance_state == "review_required",
+            GovernanceAsset.governance_state.in_(["review_required", "escalated"]),
             GovernanceAsset.workspace_id == current_user.workspace_id
         )
         .order_by(GovernanceAsset.updated_at.asc())
@@ -98,15 +98,16 @@ def submit_decision(
     item_id: str,
     body: ReviewDecisionIn,
     current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     decision_map = {
         "approve":          "reviewer_approve",
         "reject":           "reviewer_reject",
         "escalate":         "escalate",
-        "request_changes":  "escalate",
+        "request_changes":  "request_changes",
     }
-    trigger = decision_map.get(body.decision)
-    if not trigger:
+    base_trigger = decision_map.get(body.decision)
+    if not base_trigger:
         raise HTTPException(status_code=400, detail=f"Unknown decision '{body.decision}'")
 
     # Try request first, then asset
@@ -123,6 +124,11 @@ def submit_decision(
         record_type = "asset"
     if record is None:
         raise HTTPException(status_code=404, detail="Review item not found in workspace")
+
+    if record_type == "asset" and base_trigger == "reviewer_approve":
+        trigger = "asset_reviewer_approve"
+    else:
+        trigger = base_trigger
 
     try:
         new_state = transition(

@@ -27,6 +27,7 @@ def query_events(
     action: Optional[str] = Query(default=None),
     date_from: Optional[datetime] = Query(default=None),
     date_to: Optional[datetime] = Query(default=None),
+    q: Optional[str] = Query(default=None),
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0),
     current_user: CurrentUser = Depends(get_current_user),
@@ -35,20 +36,29 @@ def query_events(
     if workspace_id and workspace_id != current_user.workspace_id:
         raise HTTPException(status_code=403, detail="Cannot query another workspace")
     
-    q = db.query(GovernanceEvent).filter(GovernanceEvent.workspace_id == current_user.workspace_id)
+    query = db.query(GovernanceEvent).filter(GovernanceEvent.workspace_id == current_user.workspace_id)
     if target_type:
-        q = q.filter(GovernanceEvent.target_type == target_type)
+        query = query.filter(GovernanceEvent.target_type == target_type)
     if target_id:
-        q = q.filter(GovernanceEvent.target_id == target_id)
+        query = query.filter(GovernanceEvent.target_id == target_id)
     if actor_id:
-        q = q.filter(GovernanceEvent.actor_id == actor_id)
+        query = query.filter(GovernanceEvent.actor_id == actor_id)
     if action:
-        q = q.filter(GovernanceEvent.action == action)
+        query = query.filter(GovernanceEvent.action == action)
     if date_from:
-        q = q.filter(GovernanceEvent.occurred_at >= date_from)
+        query = query.filter(GovernanceEvent.occurred_at >= date_from)
     if date_to:
-        q = q.filter(GovernanceEvent.occurred_at <= date_to)
+        query = query.filter(GovernanceEvent.occurred_at <= date_to)
+    if q:
+        search_pattern = f"%{q}%"
+        from sqlalchemy import or_, cast, String
+        query = query.filter(
+            or_(
+                GovernanceEvent.reason.ilike(search_pattern),
+                cast(GovernanceEvent.event_payload, String).ilike(search_pattern)
+            )
+        )
 
-    total = q.count()
-    events = q.order_by(GovernanceEvent.occurred_at.desc()).offset(offset).limit(limit).all()
+    total = query.count()
+    events = query.order_by(GovernanceEvent.occurred_at.desc()).offset(offset).limit(limit).all()
     return GovernanceEventsResponse(events=events, total=total)

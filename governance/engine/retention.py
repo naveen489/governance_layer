@@ -148,6 +148,8 @@ def delete_expired_assets(db: Session) -> int:
 
 def expire_exceptions(db: Session) -> int:
     """Auto-expire exceptions past their expiry_at date."""
+    from governance.engine.state_machine import transition
+    from governance.models.request import GovernanceRequest
     now = datetime.now(timezone.utc)
     count = 0
 
@@ -166,6 +168,22 @@ def expire_exceptions(db: Session) -> int:
         if expiry <= now:
             exc.status = "expired"
             count += 1
+            
+            if exc.target_type == "request":
+                req = db.query(GovernanceRequest).filter(GovernanceRequest.id == exc.target_id).first()
+                if req and req.governance_state == "approved_for_execution":
+                    new_state = transition(
+                        db,
+                        current_state=req.governance_state,
+                        trigger="exception_expired",
+                        target_type="request",
+                        target_id=req.id,
+                        workspace_id=req.workspace_id,
+                        actor_id="system:retention_scheduler",
+                        reason=f"Exception {exc.id} expired"
+                    )
+                    req.governance_state = new_state
+                    req.updated_at = now
 
     db.commit()
     return count

@@ -26,12 +26,13 @@ export default function Dashboard() {
   const [exceptions, setExceptions] = useState([])
   const [loading, setLoading]     = useState(true)
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true)
     Promise.all([
-      fetch('/api/governance/requests?limit=100').then(r => r.json()),
-      fetch('/api/governance/assets?limit=100').then(r => r.json()),
-      fetch('/api/governance/events?limit=20').then(r => r.json()),
-      fetch('/api/governance/exceptions?limit=100').then(r => r.json()),
+      fetchApi('/api/governance/requests?limit=100').then(r => r.json()),
+      fetchApi('/api/governance/assets?limit=100').then(r => r.json()),
+      fetchApi('/api/governance/events?limit=20').then(r => r.json()),
+      fetchApi('/api/governance/exceptions?limit=100').then(r => r.json()),
     ])
       .then(([reqs, ast, evts, excs]) => {
         setRequests(Array.isArray(reqs) ? reqs : [])

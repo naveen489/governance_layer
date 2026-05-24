@@ -1,3 +1,4 @@
+import { fetchApi } from '../api.js'
 import { useState, useEffect, useCallback } from 'react'
 
 function StateBadge({ state }) {
@@ -28,7 +29,7 @@ function DecisionModal({ item, onClose, onDone }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/governance/reviews/${item.item_id}/decision`, {
+      const res = await fetchApi(`/api/governance/reviews/${item.item_id}/decision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': 'reviewer_01' },
         body: JSON.stringify({ decision, reason }),
@@ -117,7 +118,7 @@ export default function ReviewQueue() {
 
   const load = useCallback(() => {
     setLoading(true)
-    fetch('/api/governance/reviews')
+    fetchApi('/api/governance/reviews')
       .then(r => r.json())
       .then(d => setItems(Array.isArray(d) ? d : []))
       .catch(console.error)

@@ -1,3 +1,4 @@
+import { fetchApi } from '../api.js'
 import { useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 
@@ -16,7 +17,7 @@ export default function Header() {
   const [healthy, setHealthy] = useState(null)
 
   useEffect(() => {
-    fetch('/health')
+    fetchApi('/health')
       .then(r => r.ok ? setHealthy(true) : setHealthy(false))
       .catch(() => setHealthy(false))
   }, [])

@@ -1,3 +1,4 @@
+import { fetchApi } from '../api.js'
 import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 
@@ -14,7 +15,7 @@ export default function Sidebar() {
   const [queueCount, setQueueCount] = useState(null)
 
   useEffect(() => {
-    fetch('/api/governance/reviews')
+    fetchApi('/api/governance/reviews')
       .then(r => r.json())
       .then(d => setQueueCount(Array.isArray(d) ? d.length : 0))
       .catch(() => setQueueCount(0))

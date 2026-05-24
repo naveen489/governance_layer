@@ -1,3 +1,4 @@
+import { fetchApi } from '../api.js'
 import { useState, useEffect } from 'react'
 
 export default function Audit() {
@@ -9,6 +10,7 @@ export default function Audit() {
   const [actorId, setActorId]           = useState('')
   const [dateFrom, setDateFrom]         = useState('')
   const [dateTo, setDateTo]             = useState('')
+  const [q, setQ]                       = useState('')
   const [page, setPage]                 = useState(0)
 
   const PAGE_SIZE = 50
@@ -23,15 +25,16 @@ export default function Audit() {
     if (actorId)    params.set('actor_id', actorId)
     if (dateFrom)   params.set('date_from', new Date(dateFrom).toISOString())
     if (dateTo)     params.set('date_to', new Date(dateTo + 'T23:59:59').toISOString())
+    if (q)          params.set('q', q)
 
-    fetch(`/api/governance/events?${params}`)
+    fetchApi(`/api/governance/events?${params}`)
       .then(r => r.json())
       .then(d => { setEvents(d?.events || []); setTotal(d?.total || 0) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [targetType, action, actorId, dateFrom, dateTo, page])
+  useEffect(() => { load() }, [targetType, action, actorId, dateFrom, dateTo, q, page])
 
   const TARGET_TYPES = ['', 'request', 'asset', 'exception', 'policy']
 
@@ -60,7 +63,13 @@ export default function Audit() {
         />
         <input id="filter-date-from" type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(0) }} />
         <input id="filter-date-to" type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(0) }} />
-        <button className="btn btn-ghost btn-sm" onClick={() => { setTargetType(''); setAction(''); setActorId(''); setDateFrom(''); setDateTo(''); setPage(0) }}>
+        <input
+          id="filter-q"
+          placeholder="Keyword search…"
+          value={q}
+          onChange={e => { setQ(e.target.value); setPage(0) }}
+        />
+        <button className="btn btn-ghost btn-sm" onClick={() => { setTargetType(''); setAction(''); setActorId(''); setDateFrom(''); setDateTo(''); setQ(''); setPage(0) }}>
           Clear
         </button>
       </div>
