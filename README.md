@@ -32,9 +32,10 @@ The **IncuBrix Governance Layer (Capability 3)** is a standalone policy and cont
 ## ✨ Features
 
 - **Policy Evaluator Engine**: Rule-based JSON evaluation against incoming requests and generation assets.
-- **Approval State Machine**: 13-state Finite State Machine (FSM) managing the lifecycle from draft to deletion.
-- **Immutable Audit Trail**: Every state transition logs an immutable governance event for compliance.
-- **Automated Retention**: Built-in APScheduler handles data expiry, respecting legal holds and active exceptions.
+- **Approval State Machine**: Extended Finite State Machine (FSM) managing the lifecycle from draft to deletion, including `changes_requested` and `escalated` workflows.
+- **Immutable Audit Trail**: Every state transition logs an immutable governance event, now fully searchable via keyword query (`q`).
+- **Automated Retention & Expiry**: Built-in APScheduler handles data expiry, legal holds, and automatically reverts requests when temporary exceptions expire.
+- **Publish & Retention Hooks**: Downstream policy gates to dynamically escalate retention classes or approve assets for external publishing.
 - **Rights Manifests**: Automatically generates provenance and rights JSON for downstream publishing.
 - **Standalone MVP**: Operates independently with mock jobs, mock assets, and simulated provider events without needing the full IncuBrix stack.
 - **Dark-Mode UI**: A premium Vite + React administrative dashboard to view queues, exceptions, policies, and audit logs.
@@ -133,12 +134,10 @@ Navigate to `http://localhost:5174` in your browser. The UI provides several key
 - **Exceptions**: Workflows to request temporary business overrides on blocked requests.
 - **Audit Log**: An immutable, filterable ledger of every action taken within the system.
 
-### Role-Based Access
-For the Alpha MVP, authentication is simulated via HTTP headers. When interacting with the API directly, you can simulate roles using:
-```http
-X-User-Id: "user-uuid"
-X-User-Role: "admin" # (requester | reviewer | exception_reviewer | auditor | admin)
-```
+### Workspace & Role-Based Access
+For the Alpha MVP, the API relies on JSON Web Tokens (JWT) for authentication. When interacting with the API directly, you can obtain a mock Bearer token via the `/api/governance/auth/token` endpoint. 
+
+By default, the UI connects using a mock token for `user_id: "admin_01"` within the `"default"` workspace, allowing seamless demonstration of the Strict Workspace Isolation feature.
 
 ---
 
