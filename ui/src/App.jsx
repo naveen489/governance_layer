@@ -7,6 +7,9 @@ import Assets from './pages/Assets.jsx'
 import Policies from './pages/Policies.jsx'
 import Exceptions from './pages/Exceptions.jsx'
 import Audit from './pages/Audit.jsx'
+import Incidents from './pages/Incidents.jsx'
+import ProviderProfiles from './pages/ProviderProfiles.jsx'
+import PolicySimulation from './pages/PolicySimulation.jsx'
 
 export default function App() {
   return (
@@ -24,6 +27,10 @@ export default function App() {
               <Route path="/policies" element={<Policies />} />
               <Route path="/exceptions" element={<Exceptions />} />
               <Route path="/audit" element={<Audit />} />
+              {/* v2 routes */}
+              <Route path="/incidents" element={<Incidents />} />
+              <Route path="/provider-profiles" element={<ProviderProfiles />} />
+              <Route path="/simulate" element={<PolicySimulation />} />
             </Routes>
           </div>
         </div>

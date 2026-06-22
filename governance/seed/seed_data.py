@@ -27,6 +27,7 @@ from governance.models.request import GovernanceRequest
 from governance.models.asset import GovernanceAsset
 from governance.models.event import GovernanceEvent
 from governance.models.exception import GovernanceException
+from governance.models.provider_profile import ProviderPolicyProfile
 from governance.engine.rights_manifest import build_provenance, build_rights_manifest
 from governance.engine.retention import RETENTION_CLASSES
 
@@ -219,6 +220,31 @@ def _map_decision_to_state(payload: dict) -> tuple[str, str]:
 
 def seed(db):
     print("Seeding governance layer...")
+
+    # ── Provider Profiles ──────────────────────────────────────────────────────
+    profiles = [
+        ProviderPolicyProfile(
+            provider_key="openai", version=1, risk_class="low",
+            moderation_behavior={"type": "strict_inline"}, retention_behavior={"default_hours": 720},
+            webhook_behavior={"supported": False}, data_controls={"scoped_key_support": True},
+            evidence_capture_required=False, last_reviewed_at=now, source_notes="Enterprise agreement in place",
+        ),
+        ProviderPolicyProfile(
+            provider_key="runway", version=1, risk_class="medium",
+            moderation_behavior={"type": "post_generation"}, retention_behavior={"default_hours": 168},
+            webhook_behavior={"supported": True}, data_controls={"scoped_key_support": False},
+            evidence_capture_required=True, last_reviewed_at=now - timedelta(days=45), source_notes="Needs review",
+        ),
+        ProviderPolicyProfile(
+            provider_key="fal", version=1, risk_class="medium",
+            moderation_behavior={"type": "passthrough"}, retention_behavior={"default_hours": 0},
+            webhook_behavior={"supported": True}, data_controls={"scoped_key_support": True},
+            evidence_capture_required=True, last_reviewed_at=now - timedelta(days=10), source_notes="Approved for select teams",
+        ),
+    ]
+    db.add_all(profiles)
+    db.flush()
+    print(f"  OK: {len(profiles)} provider profiles seeded")
 
     # ── Policies ───────────────────────────────────────────────────────────────
     policies_data = [

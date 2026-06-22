@@ -13,6 +13,7 @@ function StateBadge({ state }) {
 function AssetDetailModal({ asset, onClose, onRefresh }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [gateResult, setGateResult] = useState(null)
   const prov = asset.provenance_json || {}
   const manifest = asset.rights_manifest_json || {}
 
@@ -30,11 +31,18 @@ function AssetDetailModal({ asset, onClose, onRefresh }) {
   const handleAction = async (endpoint) => {
     setLoading(true)
     setError(null)
+    setGateResult(null)
     try {
       const res = await fetchApi(`/api/governance/assets/${asset.id}/${endpoint}`, { method: 'POST' })
       if (!res.ok) throw new Error(await res.text())
+      
+      if (endpoint === 'publish-gate') {
+        const data = await res.json()
+        setGateResult(data)
+      } else {
+        onClose()
+      }
       onRefresh()
-      onClose()
     } catch (e) {
       setError(e.message)
     } finally {
@@ -48,10 +56,6 @@ function AssetDetailModal({ asset, onClose, onRefresh }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
           <h2 className="modal-title" style={{ marginBottom: 0 }}>Asset Detail</h2>
           <StateBadge state={asset.governance_state} />
-        </div>
-
-        <div className="tabs" id="asset-detail-tabs">
-          {/* Simple tab state via CSS class toggling – using a lightweight pattern */}
         </div>
 
         <div className="detail-grid" style={{ marginBottom: '20px' }}>
@@ -118,6 +122,30 @@ function AssetDetailModal({ asset, onClose, onRefresh }) {
           </div>
         </div>
 
+        {gateResult && (
+          <div style={{ marginBottom: '16px', padding: '16px', borderRadius: 'var(--radius-md)', background: gateResult.publish_ready ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)', border: `1px solid ${gateResult.publish_ready ? 'var(--green)' : 'var(--red)'}` }}>
+            <h3 style={{ fontSize: '14px', marginBottom: '8px', color: gateResult.publish_ready ? 'var(--green)' : 'var(--red)' }}>
+              {gateResult.publish_ready ? '✅ Publish Gate Passed' : '❌ Publish Gate Blocked'}
+            </h3>
+            {gateResult.blockers?.length > 0 && (
+              <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '8px' }}>
+                <strong>Blockers:</strong>
+                <ul style={{ paddingLeft: '20px', marginTop: '4px' }}>
+                  {gateResult.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+            {gateResult.warnings?.length > 0 && (
+              <div style={{ fontSize: '12px', color: 'var(--orange)', marginBottom: '8px' }}>
+                <strong>Warnings:</strong>
+                <ul style={{ paddingLeft: '20px', marginTop: '4px' }}>
+                  {gateResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {error && <div style={{ marginTop: '16px' }} className="alert alert-error">{error}</div>}
         
         <div className="modal-actions" style={{ marginTop: '20px' }}>
@@ -126,15 +154,20 @@ function AssetDetailModal({ asset, onClose, onRefresh }) {
             ⬇ Download Manifest
           </button>
           
-          {asset.governance_state === 'governance_passed' && (
-            <>
-              <button className="btn btn-secondary btn-sm" onClick={() => handleAction('retention')} disabled={loading}>
-                Update Retention
-              </button>
-              <button className="btn btn-success btn-sm" onClick={() => handleAction('publish')} disabled={loading}>
-                Publish Asset
-              </button>
-            </>
+          <button className="btn btn-secondary btn-sm" onClick={() => handleAction('retention')} disabled={loading}>
+            Update Retention
+          </button>
+          
+          {['governance_passed', 'warned', 'publish_ready'].includes(asset.governance_state) && (
+            <button className="btn btn-primary btn-sm" onClick={() => handleAction('publish-gate')} disabled={loading}>
+              Run Publish Gate
+            </button>
+          )}
+
+          {asset.governance_state === 'publish_ready' && (
+            <button className="btn btn-success btn-sm" onClick={() => handleAction('publish')} disabled={loading}>
+              Publish Asset
+            </button>
           )}
         </div>
       </div>

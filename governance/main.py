@@ -1,5 +1,5 @@
 """
-IncuBrix Governance Layer – FastAPI application entry point.
+IncuBrix Governance Layer v2 – FastAPI application entry point.
 
 Run with:
     uvicorn governance.main:app --reload --port 8001
@@ -12,9 +12,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Import all models so create_all_tables() registers them
+import governance.models  # noqa: F401
+
 from governance.database import create_all_tables
 from governance.scheduler import start_scheduler, stop_scheduler
-from governance.routers import requests, assets, reviews, exceptions, events, policies, auth
+from governance.routers import (
+    requests, assets, reviews, exceptions, events, policies, auth,
+    legal_holds, incidents, provider_profiles, simulate,
+)
 
 
 @asynccontextmanager
@@ -30,11 +36,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="IncuBrix Governance Layer",
     description=(
-        "Policy and control system for video generation workflows. "
-        "Evaluates policy, manages approvals, records audit events, "
-        "handles rights manifests, exceptions, and retention."
+        "Production-grade governance control plane for video generation workflows. "
+        "v2 adds: legal holds, incident management, provider policy intelligence, "
+        "publish-readiness gate, provenance records, structured rights manifests, "
+        "policy simulation, and tamper-evident audit hash chaining."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -52,7 +59,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount routers
+# ── Core v1 routers ───────────────────────────────────────────────────────────
 app.include_router(requests.router)
 app.include_router(assets.router)
 app.include_router(reviews.router)
@@ -61,7 +68,13 @@ app.include_router(events.router)
 app.include_router(policies.router)
 app.include_router(auth.router)
 
+# ── New v2 routers ────────────────────────────────────────────────────────────
+app.include_router(legal_holds.router)
+app.include_router(incidents.router)
+app.include_router(provider_profiles.router)
+app.include_router(simulate.router)
+
 
 @app.get("/health", tags=["Health"])
 def health():
-    return {"status": "ok", "service": "governance-layer", "version": "1.0.0"}
+    return {"status": "ok", "service": "governance-layer", "version": "2.0.0"}

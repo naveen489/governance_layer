@@ -11,7 +11,10 @@ class GovernanceRequest(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    source_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)  # upstream job/request ID
+    correlation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     request_payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    risk_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # { risk_class, risk_score, flags }
     governance_state: Mapped[str] = mapped_column(String(64), nullable=False, default="draft")
     policy_version: Mapped[int] = mapped_column(Integer, nullable=True)
     decision_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)

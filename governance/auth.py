@@ -13,6 +13,7 @@ security = HTTPBearer()
 class CurrentUser:
     def __init__(self, user_id: str, role: str, workspace_id: str):
         self.id = user_id
+        self.user_id = user_id
         self.role = role
         self.workspace_id = workspace_id
 

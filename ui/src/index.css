@@ -489,6 +489,55 @@ td.td-primary {
   border: 1px solid var(--border-accent);
 }
 
+/* ── v2 Badge Additions ───────────────────────────────────────────────── */
+.badge-warned {
+  background: rgba(251,191,36,0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251,191,36,0.35);
+}
+
+.badge-publish_ready {
+  background: rgba(52,211,153,0.15);
+  color: #34d399;
+  border: 1px solid rgba(52,211,153,0.4);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.badge-cancelled {
+  background: rgba(100,116,139,0.15);
+  color: #64748b;
+  border: 1px solid rgba(100,116,139,0.25);
+  text-decoration: line-through;
+}
+
+.badge-critical {
+  background: rgba(220,38,38,0.15);
+  color: #f87171;
+  border: 1px solid rgba(220,38,38,0.4);
+}
+
+.badge-deleted {
+  background: rgba(100,116,139,0.1);
+  color: #64748b;
+  border: 1px solid rgba(100,116,139,0.2);
+}
+
+.alert-warning {
+  background: rgba(251,191,36,0.1);
+  border: 1px solid rgba(251,191,36,0.3);
+  color: #fbbf24;
+}
+
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-glass);
+}
+.btn-secondary:hover {
+  background: var(--bg-glass-hover);
+  border-color: var(--accent);
+}
+
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;

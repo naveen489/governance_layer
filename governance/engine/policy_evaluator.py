@@ -1,13 +1,21 @@
+"""
+Policy Evaluator v2 – evaluates payloads against active governance policies.
+
+v2 enhancements:
+  - PolicyDecision now includes severity, next_action, evidence_refs
+  - Supports nested attribute access via dot notation (e.g., provider.status)
+  - Supports eq, in, neq, gt, lt operators in when clauses
+  - Returns reason_codes alongside human-readable reasons
+"""
 from __future__ import annotations
-"""
-Policy Evaluator – evaluates an input payload against the active governance policy
-for a given scope (request | asset | publish | retention) and workspace.
+from dataclasses import dataclass, field
+from typing import Any, Optional
+from sqlalchemy.orm import Session
 
-Returns a PolicyDecision with: action, reasons, rule_ids.
-Action can be: pass | warn | block | review_required
-"""
+from governance.models.policy import GovernancePolicy
+from governance.engine.provider_registry import get_provider_traits
 
-# Map policy evaluator action → state machine trigger (for requests)
+# Map policy action → state machine trigger (requests)
 ACTION_TO_REQUEST_TRIGGER: dict[str, str] = {
     "pass":             "policy_pass",
     "warn":             "policy_warn",
@@ -15,29 +23,13 @@ ACTION_TO_REQUEST_TRIGGER: dict[str, str] = {
     "block":            "policy_block",
 }
 
-# Map policy evaluator action → state machine trigger (for assets)
+# Map policy action → state machine trigger (assets)
 ACTION_TO_ASSET_TRIGGER: dict[str, str] = {
     "pass":             "asset_policy_pass",
     "warn":             "asset_policy_pass",
     "review_required":  "asset_policy_review",
     "block":            "asset_policy_block",
 }
-
-from dataclasses import dataclass, field
-from typing import Any, Optional
-from sqlalchemy.orm import Session
-
-from governance.models.policy import GovernancePolicy
-
-
-
-@dataclass
-class PolicyDecision:
-    action: str                          # pass | warn | block | review_required
-    reasons: list[str] = field(default_factory=list)
-    rule_ids: list[str] = field(default_factory=list)
-    policy_version: Optional[int] = None
-
 
 _ACTION_PRIORITY = {
     "pass": 0,
@@ -47,24 +39,75 @@ _ACTION_PRIORITY = {
 }
 
 
+@dataclass
+class PolicyDecision:
+    action: str                           # pass | warn | block | review_required
+    severity: str = "low"                 # low | medium | high | critical
+    reasons: list[str] = field(default_factory=list)
+    reason_codes: list[str] = field(default_factory=list)
+    rule_ids: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    next_action: Optional[str] = None     # e.g. route_to_reviewer_queue, request_rights_evidence
+    policy_version: Optional[int] = None
+
+
+def _resolve(payload: dict, key: str) -> Any:
+    """
+    Resolve a possibly dot-notated key from the payload.
+    e.g., 'provider.status' → payload['provider']['status']
+    Falls back to top-level key if no dot.
+    """
+    parts = key.split(".")
+    val: Any = payload
+    for part in parts:
+        if isinstance(val, dict):
+            val = val.get(part)
+        else:
+            return None
+    return val
+
+
 def _matches(when_clause: dict[str, Any], payload: dict[str, Any]) -> bool:
     """
-    Simple attribute matcher: every key-value pair in `when_clause` must match
-    the corresponding value in `payload` (top-level keys only).
-    Supports exact match and list containment via 'in' operator in value.
+    Extended attribute matcher supporting:
+      { "key": value }           → exact match
+      { "key": {"eq": v} }       → equality
+      { "key": {"neq": v} }      → not equal
+      { "key": {"in": [v1,v2]} } → membership
+      { "key": {"gt": n} }       → greater than
+      { "key": {"lt": n} }       → less than
     """
     for key, expected in when_clause.items():
-        actual = payload.get(key)
-        if isinstance(expected, dict) and "in" in expected:
-            if actual not in expected["in"]:
-                return False
+        actual = _resolve(payload, key)
+        if isinstance(expected, dict):
+            if "eq" in expected:
+                if actual != expected["eq"]:
+                    return False
+            if "neq" in expected:
+                if actual == expected["neq"]:
+                    return False
+            if "in" in expected:
+                if actual not in expected["in"]:
+                    return False
+            if "gt" in expected:
+                if actual is None or actual <= expected["gt"]:
+                    return False
+            if "lt" in expected:
+                if actual is None or actual >= expected["lt"]:
+                    return False
         else:
             if actual != expected:
                 return False
     return True
 
 
-from governance.engine.provider_registry import get_provider_traits
+_SEVERITY_MAP = {
+    "pass":             "low",
+    "warn":             "medium",
+    "review_required":  "medium",
+    "block":            "high",
+}
+
 
 def evaluate_policy(
     db: Session,
@@ -73,11 +116,10 @@ def evaluate_policy(
     workspace_id: str = "default",
 ) -> PolicyDecision:
     """
-    Load the active policy for the given scope and workspace, then evaluate
-    all rules against `payload`. Return the highest-priority action found.
-    Falls back to 'default' workspace policy if workspace-specific one absent.
+    Load the active policy for the given scope and workspace, evaluate all
+    rules against `payload`, and return the highest-priority decision.
+    Falls back to 'default' workspace policy if workspace-specific one is absent.
     """
-    # Try workspace-specific first, then default
     policy_row: Optional[GovernancePolicy] = None
     for ws in [workspace_id, "default"]:
         policy_row = (
@@ -94,17 +136,20 @@ def evaluate_policy(
             break
 
     if policy_row is None:
-        # No policy found – default to pass
-        return PolicyDecision(action="pass", reasons=["No active policy found – defaulting to pass"])
+        return PolicyDecision(
+            action="pass",
+            severity="low",
+            reasons=["No active policy found – defaulting to pass"],
+            next_action="continue",
+        )
 
     rules = policy_row.policy_json.get("rules", [])
-    decision = PolicyDecision(action="pass", policy_version=policy_row.version)
+    decision = PolicyDecision(action="pass", severity="low", policy_version=policy_row.version)
 
-    # Inject provider traits into payload for evaluation if provider_key exists
+    # Inject provider traits into payload for evaluation
     eval_payload = payload.copy()
     if "provider_key" in eval_payload:
         traits = get_provider_traits(eval_payload["provider_key"])
-        # Prefix traits to avoid collisions
         for k, v in traits.items():
             eval_payload[f"provider_trait_{k}"] = v
 
@@ -116,12 +161,29 @@ def evaluate_policy(
         if _matches(when, eval_payload):
             triggered_action = then.get("action", "pass")
             triggered_reason = then.get("reason", "")
+            triggered_reason_code = then.get("reason_code", "")
+            triggered_next_action = then.get("next_action", None)
+            triggered_severity = then.get("severity", _SEVERITY_MAP.get(triggered_action, "medium"))
 
-            # Escalate only if new action has higher priority
             if _ACTION_PRIORITY.get(triggered_action, 0) > _ACTION_PRIORITY.get(decision.action, 0):
                 decision.action = triggered_action
+                decision.severity = triggered_severity
+                decision.next_action = triggered_next_action
 
-            decision.reasons.append(triggered_reason)
+            if triggered_reason:
+                decision.reasons.append(triggered_reason)
+            if triggered_reason_code:
+                decision.reason_codes.append(triggered_reason_code)
             decision.rule_ids.append(rule_id)
+
+    # Set default next_action if not already set
+    if decision.next_action is None:
+        default_next = {
+            "pass":             "continue",
+            "warn":             "continue_with_warning",
+            "review_required":  "route_to_reviewer_queue",
+            "block":            "halt_and_notify",
+        }
+        decision.next_action = default_next.get(decision.action, "continue")
 
     return decision

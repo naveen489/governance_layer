@@ -1,6 +1,6 @@
 # IncuBrix Governance Layer
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![Status](https://img.shields.io/badge/status-Internal_Alpha-orange)
 ![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen)
 ![React](https://img.shields.io/badge/react-18-61DAFB?logo=react&logoColor=black)
@@ -33,12 +33,14 @@ The **IncuBrix Governance Layer (Capability 3)** is a standalone policy and cont
 
 - **Policy Evaluator Engine**: Rule-based JSON evaluation against incoming requests and generation assets.
 - **Approval State Machine**: Extended Finite State Machine (FSM) managing the lifecycle from draft to deletion, including `changes_requested` and `escalated` workflows.
-- **Immutable Audit Trail**: Every state transition logs an immutable governance event, now fully searchable via keyword query (`q`).
-- **Automated Retention & Expiry**: Built-in APScheduler handles data expiry, legal holds, and automatically reverts requests when temporary exceptions expire.
-- **Publish & Retention Hooks**: Downstream policy gates to dynamically escalate retention classes or approve assets for external publishing.
-- **Rights Manifests**: Automatically generates provenance and rights JSON for downstream publishing.
+- **Immutable Audit Trail (Tamper-Evident)**: Every state transition logs an immutable governance event, chained via SHA-256 event hashes and fully searchable via keyword query (`q`).
+- **Automated Retention & Expiry**: Built-in APScheduler handles data expiry, and automatically reverts requests when temporary exceptions expire.
+- **Provider Registry**: Manage risk classes, moderation styles, and verification status for downstream generative models.
+- **Incidents & Legal Holds**: Fully integrated capability to flag specific items for targeted investigation or freeze them entirely for legal compliance.
+- **Publish Gate**: Multi-factor downstream policy gate to dynamically verify provenance, rights manifests, and block unapproved assets from publishing.
+- **Policy Simulation**: Run proposed JSON policy changes against historical or golden payloads before activating them in production.
 - **Standalone MVP**: Operates independently with mock jobs, mock assets, and simulated provider events without needing the full IncuBrix stack.
-- **Dark-Mode UI**: A premium Vite + React administrative dashboard to view queues, exceptions, policies, and audit logs.
+- **Dark-Mode UI**: A premium Vite + React administrative dashboard to view queues, exceptions, policies, provider registries, incident alerts, and audit logs.
 
 ---
 
@@ -162,6 +164,9 @@ By default, the application uses an embedded SQLite database (`governance.db`). 
 | `governance_events` | Immutable audit trail capturing every state change |
 | `governance_exceptions` | Exception override requests and approvals |
 | `governance_policies` | Versioned JSON policy rule sets |
+| `legal_holds` | Active and released legal and incident holds applied to system targets |
+| `incidents` | Tracked security/compliance events with resolution statuses |
+| `provider_policy_profiles` | Risk models, behaviors, and settings for supported Generative AI models |
 
 ---
 
@@ -178,7 +183,12 @@ The backend exposes a comprehensive RESTful API. Below are the primary endpoints
 | `POST` | `/api/governance/reviews/{id}/decision`| Submit a human decision (Approve/Reject) |
 | `POST` | `/api/governance/exceptions` | Submit an exception request for a blocked item |
 | `PATCH`| `/api/governance/exceptions/{id}`| Approve or reject an exception request |
-| `GET`  | `/api/governance/events` | Query the immutable audit log |
+| `POST` | `/api/governance/legal-holds` | Create a targeted legal or incident hold |
+| `POST` | `/api/governance/incidents`  | Register a new security or compliance incident |
+| `GET`  | `/api/governance/provider-profiles` | Retrieve the active provider intelligence registry |
+| `POST` | `/api/governance/simulate/scenarios/run` | Simulate policy changes across seeded scenario payloads |
+| `GET`  | `/api/governance/events` | Query the immutable audit log (supports keyword and correlation filtering) |
+| `GET`  | `/api/governance/events/integrity-check` | Validate the SHA-256 chain integrity of the audit log |
 
 ---
 
@@ -205,6 +215,7 @@ When running the `seed_data.py` script, the database is populated with a rich se
 - **3 Policy Versions**: Spanning request, asset, and retention scopes
 - **9 Mock Users**: Spanning all RBAC roles
 - **10 Exceptions**: Demonstrating Pending, Approved, Rejected, and Expired states
-- **100+ Events**: A fully populated audit trail
+- **3 Provider Profiles**: Built-in configurations for OpenAI, Runway, and FAL AI
+- **100+ Events**: A fully populated, hash-chained audit trail
 
 ---

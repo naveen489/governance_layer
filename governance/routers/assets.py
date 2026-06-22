@@ -249,3 +249,148 @@ def check_retention_policy(
     db.commit()
 
     return {"asset_id": asset_id, "retention_class": asset.retention_class, "reasons": decision.reasons}
+
+
+@router.post("/{asset_id}/publish-gate")
+def publish_gate(
+    asset_id: str,
+    quality_verdict: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Full multi-factor publish-readiness gate (v2).
+    Checks: governance state, legal holds, rights manifest, retention, quality verdict.
+    """
+    from governance.engine.publish_gate import evaluate_publish_gate
+    from governance.engine.incident_engine import check_unauthorized_publish_attempt
+
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    result = evaluate_publish_gate(db, asset_id=asset_id, workspace_id=current_user.workspace_id, quality_verdict=quality_verdict)
+
+    # Auto-create incident if publish attempted on wrong state
+    if not result.publish_ready:
+        check_unauthorized_publish_attempt(db, workspace_id=current_user.workspace_id, asset_id=asset_id, asset_state=asset.governance_state)
+
+    # If ready, advance to publish_ready state
+    if result.publish_ready and asset.governance_state not in ("publish_ready", "published"):
+        try:
+            new_state = transition(
+                db,
+                current_state=asset.governance_state,
+                trigger="publish_pass",
+                target_type="asset",
+                target_id=asset.id,
+                workspace_id=asset.workspace_id,
+                actor_id=current_user.id,
+                reason="Publish gate passed all checks",
+                reason_code="PUBLISH_GATE_PASSED",
+            )
+            asset.governance_state = new_state
+            asset.publish_ready = True
+            asset.updated_at = datetime.now(timezone.utc)
+        except Exception:
+            pass  # Already in right state
+
+    db.commit()
+
+    return {
+        "asset_id": asset_id,
+        "publish_ready": result.publish_ready,
+        "blockers": result.blockers,
+        "warnings": result.warnings,
+        "checks": result.checks,
+        "governance_state": asset.governance_state,
+    }
+
+
+@router.post("/{asset_id}/rights-manifest", status_code=201)
+def create_rights_manifest(
+    asset_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create or update a structured rights manifest for an asset (v2)."""
+    from governance.models.rights_manifest import RightsManifest
+
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Upsert rights manifest
+    existing = db.query(RightsManifest).filter(RightsManifest.asset_id == asset_id).first()
+    if existing:
+        for key, val in body.items():
+            if hasattr(existing, key):
+                setattr(existing, key, val)
+        existing.updated_at = datetime.now(timezone.utc)
+        manifest = existing
+    else:
+        manifest = RightsManifest(
+            workspace_id=current_user.workspace_id,
+            asset_id=asset_id,
+            source_rights_status=body.get("source_rights_status", "missing"),
+            generated_output_rights_status=body.get("generated_output_rights_status", "unknown"),
+            allowed_usage=body.get("allowed_usage"),
+            restrictions=body.get("restrictions"),
+            attribution=body.get("attribution"),
+            source_assets=body.get("source_assets"),
+            confidence_score=body.get("confidence_score"),
+            missing_evidence=body.get("missing_evidence"),
+        )
+        db.add(manifest)
+
+    db.commit()
+    db.refresh(manifest)
+    return {
+        "manifest_id": manifest.id,
+        "asset_id": manifest.asset_id,
+        "source_rights_status": manifest.source_rights_status,
+        "generated_output_rights_status": manifest.generated_output_rights_status,
+        "confidence_score": manifest.confidence_score,
+    }
+
+
+@router.get("/{asset_id}/provenance")
+def get_asset_provenance(
+    asset_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the full provenance record for an asset (v2)."""
+    from governance.models.provenance_record import ProvenanceRecord
+
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    prov_record = db.query(ProvenanceRecord).filter(ProvenanceRecord.asset_id == asset_id).first()
+    if prov_record:
+        return {
+            "id": prov_record.id,
+            "asset_id": prov_record.asset_id,
+            "request_id": prov_record.request_id,
+            "provider_key": prov_record.provider_key,
+            "model_key": prov_record.model_key,
+            "source_assets": prov_record.source_assets,
+            "transformations": prov_record.transformations,
+            "prompt_refs": prov_record.prompt_refs,
+            "output_hash": prov_record.output_hash,
+            "created_at": prov_record.created_at,
+        }
+
+    # Fallback to inline JSON
+    return {"asset_id": asset_id, "provenance_json": asset.provenance_json or {}, "source": "inline"}
