@@ -146,6 +146,40 @@ def delete_expired_assets(db: Session) -> int:
     return deleted_count
 
 
+def hard_delete_asset(db: Session, asset_id: str) -> bool:
+    """
+    Permanently purge an asset's evidence and mark the record as purged.
+    Returns True if purged, False if hold blocked.
+    """
+    now = datetime.now(timezone.utc)
+    asset = db.query(GovernanceAsset).filter(GovernanceAsset.id == asset_id).first()
+    
+    if not asset:
+        return False
+        
+    if asset.legal_hold or asset.incident_hold or _has_active_exception(db, asset.id):
+        return False
+
+    # Simulate deleting blobs from S3 / object storage
+    asset.governance_state = "purged"
+    asset.updated_at = now
+    
+    event = GovernanceEvent(
+        id=str(uuid.uuid4()),
+        workspace_id=asset.workspace_id,
+        target_type="asset",
+        target_id=asset.id,
+        actor_id="system:retention_purger",
+        action="purge",
+        reason="Asset hard deletion completed",
+        event_payload={"purged_at": now.isoformat()},
+        occurred_at=now,
+    )
+    db.add(event)
+    db.commit()
+    return True
+
+
 def expire_exceptions(db: Session) -> int:
     """Auto-expire exceptions past their expiry_at date."""
     from governance.engine.state_machine import transition

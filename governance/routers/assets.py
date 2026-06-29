@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from governance.database import get_db
@@ -394,3 +395,45 @@ def get_asset_provenance(
 
     # Fallback to inline JSON
     return {"asset_id": asset_id, "provenance_json": asset.provenance_json or {}, "source": "inline"}
+
+
+class QualityVerdictUpdate(BaseModel):
+    quality_verdict_ref: str
+
+
+@router.patch("/{asset_id}/quality-verdict")
+def update_quality_verdict(
+    asset_id: str,
+    body: QualityVerdictUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the quality_verdict_ref for an asset. Triggered by QualityOps integration."""
+    asset = db.query(GovernanceAsset).filter(
+        GovernanceAsset.id == asset_id,
+        GovernanceAsset.workspace_id == current_user.workspace_id
+    ).first()
+    
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    asset.quality_verdict_ref = body.quality_verdict_ref
+    asset.updated_at = datetime.now(timezone.utc)
+    
+    from governance.models.event import GovernanceEvent
+    event = GovernanceEvent(
+        id=str(uuid.uuid4()),
+        workspace_id=asset.workspace_id,
+        target_type="asset",
+        target_id=asset.id,
+        actor_id=current_user.id,
+        action="update_quality_verdict",
+        reason=f"QualityOps verdict updated to {body.quality_verdict_ref}",
+        event_payload={"quality_verdict_ref": body.quality_verdict_ref},
+        occurred_at=datetime.now(timezone.utc),
+    )
+    db.add(event)
+    db.commit()
+
+    return {"asset_id": asset_id, "quality_verdict_ref": asset.quality_verdict_ref}
+

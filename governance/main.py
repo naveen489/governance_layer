@@ -19,7 +19,7 @@ from governance.database import create_all_tables
 from governance.scheduler import start_scheduler, stop_scheduler
 from governance.routers import (
     requests, assets, reviews, exceptions, events, policies, auth,
-    legal_holds, incidents, provider_profiles, simulate,
+    legal_holds, incidents, provider_profiles, simulate, webhooks, retention
 )
 
 
@@ -73,6 +73,8 @@ app.include_router(legal_holds.router)
 app.include_router(incidents.router)
 app.include_router(provider_profiles.router)
 app.include_router(simulate.router)
+app.include_router(webhooks.router)
+app.include_router(retention.router)
 
 
 @app.get("/health", tags=["Health"])

@@ -24,5 +24,6 @@ class GovernanceReviewTask(Base):
     decision: Mapped[str | None] = mapped_column(String(32), nullable=True)   # approve | reject | request_changes | escalate
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    secondary_approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

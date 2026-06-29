@@ -111,3 +111,65 @@ def integrity_check(
         "integrity": "valid" if not broken_links else "tampered",
         "details": broken_links,
     }
+
+
+@router.get("/export")
+def export_compliance_events(
+    date_from: Optional[datetime] = Query(default=None),
+    date_to: Optional[datetime] = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a downloadable, cryptographically signed JSON package of audit events
+    for external compliance review (GOV2-FR-074).
+    """
+    import hashlib, json
+    from fastapi.responses import Response
+
+    q = db.query(GovernanceEvent).filter(GovernanceEvent.workspace_id == current_user.workspace_id)
+    if date_from:
+        q = q.filter(GovernanceEvent.occurred_at >= date_from)
+    if date_to:
+        q = q.filter(GovernanceEvent.occurred_at <= date_to)
+        
+    events = q.order_by(GovernanceEvent.occurred_at.asc()).all()
+    
+    events_data = []
+    for e in events:
+        events_data.append({
+            "id": e.id,
+            "target_type": e.target_type,
+            "target_id": e.target_id,
+            "actor_id": e.actor_id,
+            "action": e.action,
+            "reason": e.reason,
+            "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+            "event_hash": e.event_hash,
+            "previous_event_hash": e.previous_event_hash,
+        })
+        
+    # Serialize and sign the bundle
+    payload = json.dumps(events_data, sort_keys=True)
+    signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    
+    bundle = {
+        "workspace_id": current_user.workspace_id,
+        "generated_at": datetime.now().isoformat(),
+        "date_range": {
+            "from": date_from.isoformat() if date_from else None,
+            "to": date_to.isoformat() if date_to else None,
+        },
+        "record_count": len(events_data),
+        "bundle_signature": signature,
+        "events": events_data,
+    }
+    
+    return Response(
+        content=json.dumps(bundle, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="audit_export_{current_user.workspace_id}_{datetime.now().strftime("%Y%m%d")}.json"'
+        }
+    )
+

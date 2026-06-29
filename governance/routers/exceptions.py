@@ -112,6 +112,8 @@ def decide_exception(
         raise HTTPException(status_code=404, detail="Exception not found in workspace")
     if exc.status != "pending":
         raise HTTPException(status_code=422, detail=f"Exception is already '{exc.status}'")
+    if exc.requested_by == current_user.id:
+        raise HTTPException(status_code=403, detail="Separation of Duties violation: Cannot approve own exception")
 
     if body.decision not in ("approve", "reject"):
         raise HTTPException(status_code=400, detail="Decision must be 'approve' or 'reject'")

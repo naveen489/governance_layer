@@ -125,6 +125,23 @@ def submit_decision(
     if record is None:
         raise HTTPException(status_code=404, detail="Review item not found in workspace")
 
+    from governance.models.review_task import GovernanceReviewTask
+    task = db.query(GovernanceReviewTask).filter(
+        GovernanceReviewTask.target_id == item_id,
+        GovernanceReviewTask.status.in_(["open", "assigned", "in_review"])
+    ).first()
+
+    if task and task.risk_severity in ("high", "critical") and base_trigger == "reviewer_approve":
+        if not task.decision_by:
+            task.decision_by = current_user.id
+            task.status = "in_review"
+            db.commit()
+            return ReviewDecisionOut(status="first_approval_granted", updated_state=record.governance_state)
+        elif task.decision_by == current_user.id:
+            raise HTTPException(status_code=403, detail="Separation of Duties violation: Need a different reviewer for second approval")
+        else:
+            task.secondary_approved_by = current_user.id
+
     if record_type == "asset" and base_trigger == "reviewer_approve":
         trigger = "asset_reviewer_approve"
     else:
@@ -146,6 +163,14 @@ def submit_decision(
 
     record.governance_state = new_state
     record.updated_at = datetime.now(timezone.utc)
+    
+    if task:
+        task.status = "closed"
+        task.decision = body.decision
+        if not task.decision_by:
+            task.decision_by = current_user.id
+        task.closed_at = datetime.now(timezone.utc)
+
     db.commit()
 
     status_map = {
