@@ -37,6 +37,8 @@ def evaluate_asset(
 ):
     workspace_id = current_user.workspace_id
     if body.workspace_id and body.workspace_id != workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, body.workspace_id, "create_asset", "Cannot create asset in another workspace")
         raise HTTPException(status_code=403, detail="Cannot create asset in another workspace")
     
     if body.request_id:
@@ -71,6 +73,7 @@ def evaluate_asset(
         model_key=body.model_key,
         asset_payload=body.asset_payload,
         retention_class=body.retention_class,
+        db=db,
     )
 
     asset_id = str(uuid.uuid4())
@@ -109,6 +112,24 @@ def evaluate_asset(
 
     asset.governance_state = new_state
     asset.updated_at = datetime.now(timezone.utc)
+    
+    if new_state in ("review_required", "escalated"):
+        from governance.models.review_task import GovernanceReviewTask
+        severity = decision.severity if hasattr(decision, "severity") else "medium"
+        task = GovernanceReviewTask(
+            id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            target_type="asset",
+            target_id=asset_id,
+            task_type="review_required",
+            risk_severity=severity,
+            policy_reasons=decision.reasons,
+            status="open",
+            sla_due_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(task)
+        
     db.commit()
 
     return EvaluateAssetOut(asset_id=asset_id, state=new_state, reasons=decision.reasons)
@@ -125,6 +146,8 @@ def list_assets(
     db: Session = Depends(get_db),
 ):
     if workspace_id and workspace_id != current_user.workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, workspace_id, "list_assets", "Cannot query another workspace")
         raise HTTPException(status_code=403, detail="Cannot query another workspace")
 
     q = db.query(GovernanceAsset).filter(GovernanceAsset.workspace_id == current_user.workspace_id)
@@ -159,7 +182,6 @@ def download_manifest(asset_id: str, current_user: CurrentUser = Depends(get_cur
         headers={"Content-Disposition": f'attachment; filename="manifest_{asset_id}.json"'},
     )
 
-
 @router.post("/{asset_id}/publish")
 def check_publish_policy(
     asset_id: str,
@@ -172,9 +194,29 @@ def check_publish_policy(
     ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-        
-    if asset.governance_state != "governance_passed":
-        raise HTTPException(status_code=400, detail="Asset must be in governance_passed state to evaluate publish policy")
+
+    from governance.engine.publish_gate import evaluate_publish_gate
+    from governance.engine.incident_engine import check_unauthorized_publish_attempt
+
+    # Evaluate the full multi-factor publish gate
+    result = evaluate_publish_gate(db, asset_id=asset_id, workspace_id=current_user.workspace_id)
+    if not result.publish_ready:
+        # Create an incident for unauthorized attempt
+        check_unauthorized_publish_attempt(
+            db, 
+            workspace_id=current_user.workspace_id, 
+            asset_id=asset_id, 
+            asset_state=asset.governance_state
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Publish blocked by publish gate checks",
+                "blockers": result.blockers,
+                "warnings": result.warnings
+            }
+        )
 
     decision = evaluate_policy(db, scope="publish", payload=asset.asset_payload, workspace_id=asset.workspace_id)
     
@@ -183,24 +225,25 @@ def check_publish_policy(
     else:
         trigger = "publish_block"
         
-    new_state = transition(
-        db,
-        current_state=asset.governance_state,
-        trigger=trigger,
-        target_type="asset",
-        target_id=asset.id,
-        workspace_id=asset.workspace_id,
-        actor_id=current_user.id,
-        reason="; ".join(decision.reasons) if decision.reasons else "Evaluated publish policy",
-        event_payload={"decision": decision.action, "rule_ids": decision.rule_ids},
-    )
-
-    asset.governance_state = new_state
-    asset.updated_at = datetime.now(timezone.utc)
-    db.commit()
-
-    return {"asset_id": asset_id, "state": new_state, "reasons": decision.reasons}
-
+    try:
+        new_state = transition(
+            db,
+            current_state=asset.governance_state,
+            trigger=trigger,
+            target_type="asset",
+            target_id=asset.id,
+            workspace_id=asset.workspace_id,
+            actor_id=current_user.id,
+            reason="; ".join(decision.reasons) if decision.reasons else "Asset published",
+            event_payload={"decision": decision.action, "rule_ids": decision.rule_ids},
+        )
+        asset.governance_state = new_state
+        asset.publish_ready = True
+        asset.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"asset_id": asset_id, "state": new_state, "reasons": decision.reasons}
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 @router.post("/{asset_id}/retention")
 def check_retention_policy(

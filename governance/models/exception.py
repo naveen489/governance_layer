@@ -15,7 +15,7 @@ class GovernanceException(Base):
     target_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     requested_by: Mapped[str] = mapped_column(String(36), nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     scope_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     expiry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     business_reason: Mapped[str] = mapped_column(Text, nullable=False)

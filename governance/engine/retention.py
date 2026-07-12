@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from governance.models.asset import GovernanceAsset
 from governance.models.event import GovernanceEvent
 from governance.models.exception import GovernanceException
+from governance.models.legal_hold import LegalHold
 
 RETENTION_CLASSES = {
     "short": 7,
@@ -50,6 +51,46 @@ def _has_active_exception(db: Session, asset_id: str) -> bool:
     return expiry > now
 
 
+def _get_blocked_asset_ids(db: Session, asset_ids: list[str]) -> tuple[set[str], set[str]]:
+    """
+    Returns a tuple of (held_asset_ids, excepted_asset_ids) for the given asset_ids
+    using batch queries to avoid N+1.
+    Checks both the asset's active LegalHold entries and active approved GovernanceExceptions.
+    """
+    if not asset_ids:
+        return set(), set()
+        
+    now = datetime.now(timezone.utc)
+    
+    # 1. Batch query active LegalHold entries targeting these assets
+    active_holds = db.query(LegalHold.target_id).filter(
+        LegalHold.target_id.in_(asset_ids),
+        LegalHold.target_type == "asset",
+        LegalHold.status == "active"
+    ).all()
+    held_asset_ids = {h.target_id for h in active_holds}
+    
+    # 2. Batch query active approved GovernanceExceptions targeting these assets
+    active_exceptions = db.query(GovernanceException).filter(
+        GovernanceException.target_id.in_(asset_ids),
+        GovernanceException.target_type == "asset",
+        GovernanceException.status == "approved"
+    ).all()
+    
+    excepted_asset_ids = set()
+    for exc in active_exceptions:
+        if exc.expiry_at is None:
+            excepted_asset_ids.add(exc.target_id)
+        else:
+            expiry = exc.expiry_at
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry > now:
+                excepted_asset_ids.add(exc.target_id)
+                
+    return held_asset_ids, excepted_asset_ids
+
+
 def evaluate_retention(db: Session) -> dict[str, int]:
     """
     Scan all assets, expire those past their retention window with no blockers.
@@ -61,10 +102,11 @@ def evaluate_retention(db: Session) -> dict[str, int]:
 
     assets = (
         db.query(GovernanceAsset)
-        .filter(GovernanceAsset.governance_state.notin_(["expired", "deleted"]))
+        .filter(GovernanceAsset.governance_state.notin_(["expired", "deleted", "purged"]))
         .all()
     )
 
+    candidate_assets = []
     for asset in assets:
         if asset.retention_expires_at is None:
             continue
@@ -73,17 +115,21 @@ def evaluate_retention(db: Session) -> dict[str, int]:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
 
-        if expires_at > now:
-            continue  # Not expired yet
+        if expires_at <= now:
+            candidate_assets.append((asset, expires_at))
 
-        # Check blockers
-        if asset.legal_hold:
-            skipped_count += 1
-            continue
-        if asset.incident_hold:
-            skipped_count += 1
-            continue
-        if _has_active_exception(db, asset.id):
+    candidate_ids = [asset.id for asset, _ in candidate_assets]
+    held_ids, excepted_ids = _get_blocked_asset_ids(db, candidate_ids)
+
+    for asset, expires_at in candidate_assets:
+        # Check blockers (both flags and active table records)
+        is_held = (
+            asset.legal_hold 
+            or asset.incident_hold 
+            or asset.id in held_ids 
+            or asset.id in excepted_ids
+        )
+        if is_held:
             skipped_count += 1
             continue
 
@@ -119,9 +165,18 @@ def delete_expired_assets(db: Session) -> int:
         .all()
     )
 
+    candidate_ids = [asset.id for asset in expired_assets]
+    held_ids, excepted_ids = _get_blocked_asset_ids(db, candidate_ids)
+
     for asset in expired_assets:
         # Final safety check before deletion
-        if asset.legal_hold or asset.incident_hold or _has_active_exception(db, asset.id):
+        is_held = (
+            asset.legal_hold 
+            or asset.incident_hold 
+            or asset.id in held_ids 
+            or asset.id in excepted_ids
+        )
+        if is_held:
             continue
         
         # Soft delete the asset
@@ -157,7 +212,14 @@ def hard_delete_asset(db: Session, asset_id: str) -> bool:
     if not asset:
         return False
         
-    if asset.legal_hold or asset.incident_hold or _has_active_exception(db, asset.id):
+    # Check table directly for active holds
+    hold_exists = db.query(LegalHold).filter(
+        LegalHold.target_id == asset_id,
+        LegalHold.target_type == "asset",
+        LegalHold.status == "active"
+    ).first() is not None
+
+    if asset.legal_hold or asset.incident_hold or hold_exists or _has_active_exception(db, asset.id):
         return False
 
     # Simulate deleting blobs from S3 / object storage

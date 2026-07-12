@@ -3,6 +3,7 @@ let accessToken = null;
 async function fetchToken() {
   const payload = {
     user_id: "admin_01",
+    password: "admin_password",
     role: "admin",
     workspace_id: "default"
   };

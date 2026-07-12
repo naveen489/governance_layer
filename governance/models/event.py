@@ -20,7 +20,7 @@ class GovernanceEvent(Base):
     target_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     actor_id: Mapped[str] = mapped_column(String(36), nullable=False)
     actor_type: Mapped[str] = mapped_column(String(16), nullable=False, default="user")  # user | system | provider
-    action: Mapped[str] = mapped_column(String(64), nullable=False)        # approve, reject, block, delete, etc.
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)        # approve, reject, block, delete, etc.
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)  # e.g. PROVIDER_NOT_APPROVED
     event_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)

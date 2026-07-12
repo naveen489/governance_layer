@@ -5,7 +5,7 @@ GET   – list requests with optional filters
 GET /{id} – get single request detail
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,6 +38,8 @@ def create_governance_request(
     # Strictly enforce workspace isolation
     workspace_id = current_user.workspace_id
     if body.workspace_id and body.workspace_id != workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, body.workspace_id, "create_request", "Cannot create request in another workspace")
         raise HTTPException(status_code=403, detail="Cannot create request in another workspace")
 
     # Evaluate policy
@@ -92,6 +94,24 @@ def create_governance_request(
 
     req.governance_state = new_state
     req.updated_at = datetime.now(timezone.utc)
+    
+    if new_state in ("review_required", "escalated"):
+        from governance.models.review_task import GovernanceReviewTask
+        severity = decision.severity if hasattr(decision, "severity") else "medium"
+        task = GovernanceReviewTask(
+            id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            target_type="request",
+            target_id=req_id,
+            task_type="review_required",
+            risk_severity=severity,
+            policy_reasons=decision.reasons,
+            status="open",
+            sla_due_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(task)
+        
     db.commit()
     db.refresh(req)
 
@@ -116,6 +136,8 @@ def list_requests(
 ):
     # Strict workspace isolation
     if workspace_id and workspace_id != current_user.workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, workspace_id, "list_requests", "Cannot query another workspace")
         raise HTTPException(status_code=403, detail="Cannot query another workspace")
     
     q = db.query(GovernanceRequest).filter(GovernanceRequest.workspace_id == current_user.workspace_id)

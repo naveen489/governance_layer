@@ -39,6 +39,8 @@ def submit_exception(
     
     workspace_id = current_user.workspace_id
     if body.workspace_id and body.workspace_id != workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, body.workspace_id, "create_exception", "Cannot create exception in another workspace")
         raise HTTPException(status_code=403, detail="Cannot create exception in another workspace")
 
     exc = GovernanceException(
@@ -84,6 +86,8 @@ def list_exceptions(
     db: Session = Depends(get_db),
 ):
     if workspace_id and workspace_id != current_user.workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, workspace_id, "list_exceptions", "Cannot query another workspace")
         raise HTTPException(status_code=403, detail="Cannot query another workspace")
     
     q = db.query(GovernanceException).filter(GovernanceException.workspace_id == current_user.workspace_id)

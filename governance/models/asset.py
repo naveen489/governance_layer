@@ -16,11 +16,11 @@ class GovernanceAsset(Base):
     asset_type: Mapped[str] = mapped_column(String(32), nullable=False, default="generated")  # generated | derivative | transformed
     provider_key: Mapped[str] = mapped_column(String(64), nullable=False)
     model_key: Mapped[str] = mapped_column(String(128), nullable=False)
-    governance_state: Mapped[str] = mapped_column(String(64), nullable=False, default="asset_registered")
+    governance_state: Mapped[str] = mapped_column(String(64), nullable=False, default="asset_registered", index=True)
     quality_verdict_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)  # reference to quality verdict
     publish_ready: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     retention_class: Mapped[str] = mapped_column(String(32), nullable=False, default="standard")
-    retention_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    retention_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     legal_hold: Mapped[bool] = mapped_column(default=False)
     incident_hold: Mapped[bool] = mapped_column(default=False)
     provenance_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)

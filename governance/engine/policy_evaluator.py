@@ -127,7 +127,7 @@ def evaluate_policy(
             .filter(
                 GovernancePolicy.workspace_id == ws,
                 GovernancePolicy.policy_scope == scope,
-                GovernancePolicy.is_active.is_(True),
+                GovernancePolicy.is_active == True,
             )
             .order_by(GovernancePolicy.version.desc())
             .first()
@@ -136,11 +136,13 @@ def evaluate_policy(
             break
 
     if policy_row is None:
+        from governance.reason_codes import POLICY_FAIL_CLOSED
         return PolicyDecision(
-            action="pass",
-            severity="low",
-            reasons=["No active policy found – defaulting to pass"],
-            next_action="continue",
+            action="review_required",
+            severity="medium",
+            reasons=["No active policy found – fail-closed default"],
+            reason_codes=[POLICY_FAIL_CLOSED],
+            next_action="route_to_reviewer_queue",
         )
 
     rules = policy_row.policy_json.get("rules", [])
@@ -149,7 +151,7 @@ def evaluate_policy(
     # Inject provider traits into payload for evaluation
     eval_payload = payload.copy()
     if "provider_key" in eval_payload:
-        traits = get_provider_traits(eval_payload["provider_key"])
+        traits = get_provider_traits(eval_payload["provider_key"], db)
         for k, v in traits.items():
             eval_payload[f"provider_trait_{k}"] = v
 

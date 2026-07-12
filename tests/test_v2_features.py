@@ -134,6 +134,7 @@ def test_publish_policy_endpoint(db_session: Session):
         governance_state="governance_passed",
         retention_class="standard",
         asset_payload={"text": "Hello world"},
+        rights_manifest_json={"publish_cleared": True, "source_rights_status": "cleared"},
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)
     )

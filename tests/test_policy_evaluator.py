@@ -66,10 +66,10 @@ SAMPLE_POLICY = {
 
 
 def test_evaluate_policy_pass_when_no_active_policy():
-    """When no active policy is found, default to pass."""
+    """When no active policy is found, default to review_required."""
     db = _make_db_no_policy()
     decision = evaluate_policy(db, scope="request", payload={"risk_class": "low"})
-    assert decision.action == "pass"
+    assert decision.action == "review_required"
 
 
 def test_evaluate_policy_block_on_high_risk():

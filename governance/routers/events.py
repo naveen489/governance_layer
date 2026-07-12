@@ -36,6 +36,8 @@ def query_events(
     db: Session = Depends(get_db),
 ):
     if workspace_id and workspace_id != current_user.workspace_id:
+        from governance.auth import audit_access_denied
+        audit_access_denied(db, current_user.user_id, workspace_id, "list_events", "Cannot query another workspace")
         raise HTTPException(status_code=403, detail="Cannot query another workspace")
 
     query = db.query(GovernanceEvent).filter(GovernanceEvent.workspace_id == current_user.workspace_id)
@@ -57,13 +59,7 @@ def query_events(
         query = query.filter(GovernanceEvent.occurred_at <= date_to)
     if q:
         search_pattern = f"%{q}%"
-        from sqlalchemy import or_, cast, String
-        query = query.filter(
-            or_(
-                GovernanceEvent.reason.ilike(search_pattern),
-                cast(GovernanceEvent.event_payload, String).ilike(search_pattern)
-            )
-        )
+        query = query.filter(GovernanceEvent.reason.ilike(search_pattern))
 
     total = query.count()
     events = query.order_by(GovernanceEvent.occurred_at.desc()).offset(offset).limit(limit).all()

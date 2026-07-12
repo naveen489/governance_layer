@@ -41,7 +41,19 @@ def get_db():
 
 
 def create_all_tables():
-    """Create all tables defined via ORM models."""
-    # import models so metadata is populated
-    from governance.models import request, asset, event, exception, policy  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    """Create all tables defined via ORM models or run migrations."""
+    import os
+    from alembic.config import Config
+    from alembic import command
+    
+    # Import all models to ensure metadata is populated
+    import governance.models  # noqa: F401
+    
+    if DATABASE_URL.startswith("sqlite:///:memory:") or DATABASE_URL == "sqlite://":
+        Base.metadata.create_all(bind=engine)
+    else:
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        ini_path = os.path.join(base_dir, "alembic.ini")
+        alembic_cfg = Config(ini_path)
+        alembic_cfg.set_main_option("script_location", os.path.join(base_dir, "alembic"))
+        command.upgrade(alembic_cfg, "head")

@@ -72,6 +72,18 @@ def client():
             created_at=datetime.now(timezone.utc),
         )
         db.add(pol2)
+    if not db.query(GovernancePolicy).filter(GovernancePolicy.id == "shared-publish-pol").first():
+        pol3 = GovernancePolicy(
+            id="shared-publish-pol",
+            workspace_id="default",
+            policy_scope="publish",
+            version=1,
+            policy_json={"rules": []},
+            is_active=True,
+            effective_from=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(pol3)
     db.commit()
     db.close()
 

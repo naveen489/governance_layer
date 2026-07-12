@@ -99,8 +99,50 @@ def evaluate_publish_gate(
             result.blockers.append("No rights manifest found for this asset.")
             result.checks["rights_manifest_ok"] = False
         else:
-            result.checks["rights_manifest_ok"] = True
             result.checks["rights_source"] = "inline_json"
+            
+            # Check publish_cleared flag explicitly if present
+            if "publish_cleared" in inline and not inline.get("publish_cleared"):
+                result.blockers.append("Rights manifest is not cleared for publishing.")
+                result.checks["rights_manifest_ok"] = False
+            else:
+                result.checks["rights_manifest_ok"] = True
+
+            # Check source rights status
+            source_rights_status = inline.get("source_rights_status")
+            if source_rights_status in ("missing", "expired"):
+                result.blockers.append(
+                    f"Source rights status is '{source_rights_status}' – publish blocked."
+                )
+                result.checks["rights_manifest_ok"] = False
+            elif source_rights_status == "partial":
+                result.warnings.append("Source rights are only partially complete.")
+                if result.checks.get("rights_manifest_ok") is True:
+                    result.checks["rights_manifest_ok"] = "partial"
+
+            # Check expiry
+            expiry_str = inline.get("expiry_at")
+            if expiry_str:
+                try:
+                    expiry = datetime.fromisoformat(expiry_str)
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                    if expiry < datetime.now(timezone.utc):
+                        result.blockers.append("Rights manifest has expired.")
+                        result.checks["rights_not_expired"] = False
+                    else:
+                        result.checks["rights_not_expired"] = True
+                except ValueError:
+                    pass
+
+            # Check unresolved restrictions
+            restrictions = inline.get("restrictions") or []
+            blocking_restrictions = [r for r in restrictions if isinstance(r, dict) and r.get("blocks_publish")]
+            if blocking_restrictions:
+                result.blockers.append(f"{len(blocking_restrictions)} unresolved publish-blocking restriction(s).")
+                result.checks["restrictions_clear"] = False
+            else:
+                result.checks["restrictions_clear"] = True
     else:
         result.checks["rights_source"] = "rights_manifests_table"
         if rights.source_rights_status in ("missing", "expired"):

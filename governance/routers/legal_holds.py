@@ -12,6 +12,7 @@ from governance.database import get_db
 from governance.auth import get_current_user, CurrentUser
 from governance.models.legal_hold import LegalHold
 from governance.models.event import GovernanceEvent
+from governance.models.asset import GovernanceAsset
 
 router = APIRouter(prefix="/api/governance/legal-holds", tags=["Legal Holds"])
 
@@ -35,6 +36,18 @@ def create_hold(
     user: CurrentUser = Depends(get_current_user),
 ):
     """Create a legal or incident hold on a target record."""
+    if body.target_type == "asset":
+        asset = db.query(GovernanceAsset).filter(
+            GovernanceAsset.id == body.target_id,
+            GovernanceAsset.workspace_id == user.workspace_id
+        ).first()
+        if not asset:
+            raise HTTPException(status_code=404, detail="Target asset not found in workspace.")
+        if body.hold_type == "legal":
+            asset.legal_hold = True
+        elif body.hold_type == "incident":
+            asset.incident_hold = True
+
     hold = LegalHold(
         workspace_id=user.workspace_id,
         target_type=body.target_type,
@@ -128,6 +141,25 @@ def release_hold(
     hold.released_at = datetime.now(timezone.utc)
     hold.released_by = user.user_id
     hold.release_reason = body.release_reason
+
+    # Also update asset's flag if target_type is "asset"
+    if hold.target_type == "asset":
+        remaining_holds_count = db.query(LegalHold).filter(
+            LegalHold.target_id == hold.target_id,
+            LegalHold.target_type == "asset",
+            LegalHold.hold_type == hold.hold_type,
+            LegalHold.status == "active"
+        ).count()
+        if remaining_holds_count == 0:
+            asset = db.query(GovernanceAsset).filter(
+                GovernanceAsset.id == hold.target_id,
+                GovernanceAsset.workspace_id == user.workspace_id
+            ).first()
+            if asset:
+                if hold.hold_type == "legal":
+                    asset.legal_hold = False
+                elif hold.hold_type == "incident":
+                    asset.incident_hold = False
 
     db.add(GovernanceEvent(
         workspace_id=user.workspace_id,
